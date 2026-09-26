@@ -1,19 +1,37 @@
-"""Configuration - all localhost, no API keys."""
+"""
+Configuration – all settings for the Document Understanding Agent
+Optimized for models under 2GB
+"""
+
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
 
-    ollama_url: str = "http://localhost:11434"
-    llm_model: str = "qwen2.5:3b"
+    # Ollama settings
+    ollama_url: str = "http://127.0.0.1:11434"
+    llm_model: str = "qwen2.5:3b"          # change to qwen2.5:1.5b if you want faster
+
+    # CORS
     cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500"
-    max_upload_size_mb: int = 10
-    top_k: int = 4
-    min_similarity: float = 0.10
-    chunk_size: int = 500
+
+    # Upload limits
+    max_upload_size_mb: int = 15
+
+    # Retrieval settings (important for small models)
+    top_k: int = 4                        # how many chunks to send to the model
+    min_similarity: float = 0.12          # minimum score to accept a chunk
+
+    # Chunking settings
+    chunk_size: int = 450
     chunk_overlap: int = 80
+
+    # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"
 
     @property
@@ -22,5 +40,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Create folders if they do not exist
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)

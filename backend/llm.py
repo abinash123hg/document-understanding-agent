@@ -1,19 +1,36 @@
-"""Local LLM via Ollama - no API keys, 100% offline."""
+"""
+Local LLM via Ollama – optimized for small models under 2GB
+Strict document-only answering
+"""
+
 import requests
 from backend.config import settings
 
-SYSTEM_PROMPT = (
-    "You are a document assistant. Answer ONLY using the provided document excerpts.\n"
-    "If the context does not contain the answer, say exactly: "
-    "'The uploaded documents do not contain this information.'\n"
-    "Never invent facts. Keep answers short and clear."
-)
+
+SYSTEM_PROMPT = """You are a strict document-only assistant.
+
+RULES (must follow exactly):
+1. Answer ONLY using the information in the provided CONTEXT.
+2. If the answer is not clearly present in the CONTEXT, reply with exactly this sentence:
+   I could not find the answer in this document.
+3. Never use outside knowledge.
+4. Never invent facts, definitions, quotes, dates, names or examples.
+5. Keep the answer short, clear and complete.
+6. Use simple language.
+
+CONTEXT will be given below. Use only that.
+"""
 
 
 def build_context(sources: list[dict]) -> str:
+    if not sources:
+        return "No relevant information found."
+
     parts = []
     for i, s in enumerate(sources, 1):
-        parts.append(f"[Source {i} | {s['filename']} | part {s['chunk_index']}]\n{s['text']}")
+        text = s.get("text", "").strip()
+        if text:
+            parts.append(f"[Excerpt {i}]\n{text}")
     return "\n\n".join(parts)
 
 
@@ -26,27 +43,47 @@ def is_ollama_ready() -> bool:
 
 
 def generate_answer(question: str, sources: list[dict]) -> str:
+    context = build_context(sources)
+
+    user_message = f"""CONTEXT:
+{context}
+
+QUESTION:
+{question}
+
+Answer using only the CONTEXT above. If the answer is not in the CONTEXT, say exactly:
+I could not find the answer in this document."""
+
     payload = {
         "model": settings.llm_model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                f"Context from documents:\n\n{build_context(sources)}\n\n"
-                f"Question: {question}\n\nAnswer using only the context above:"
-            )},
+            {"role": "user", "content": user_message}
         ],
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {
+            "temperature": 0.0,
+            "top_p": 0.1,
+            "repeat_penalty": 1.15,
+            "num_predict": 400
+        }
     }
+
     try:
-        r = requests.post(f"{settings.ollama_url}/api/chat", json=payload, timeout=120)
+        r = requests.post(
+            f"{settings.ollama_url}/api/chat",
+            json=payload,
+            timeout=120
+        )
         r.raise_for_status()
         answer = r.json()["message"]["content"].strip()
+
         if not answer:
-            raise RuntimeError("Empty answer from local LLM.")
+            return "I could not find the answer in this document."
+
         return answer
+
     except requests.exceptions.ConnectionError:
-        raise RuntimeError(
-            "Ollama is not running. Start it with: ollama serve "
-            "(and once: ollama pull qwen2.5:3b)"
-        )
+        raise RuntimeError("Ollama is not running. Start it with: ollama serve")
+    except Exception as e:
+        raise RuntimeError(f"LLM error: {e}")

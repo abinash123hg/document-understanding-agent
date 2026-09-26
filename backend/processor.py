@@ -1,81 +1,123 @@
-﻿"""Extract text from files, chunk it, store it."""
+﻿"""
+Extract text from documents → clean → chunk → store
+Supports PDF, DOCX, TXT, MD and images (OCR)
+"""
+
 import logging
 import uuid
 from pathlib import Path
+
 from backend.config import settings
 from backend.storage import add_chunks
 
 logger = logging.getLogger(__name__)
-MIN_CHARS = 20  # below this, a "digital" PDF is treated as scanned
+MIN_CHARS = 25   # if digital text is shorter than this → treat as scanned
 
 
 def extract_text(path: Path) -> tuple[str, str]:
-    """Return (text, method: 'digital' | 'ocr')."""
+    """
+    Extract text from file.
+    Returns: (text, method) where method is 'digital' or 'ocr'
+    """
     ext = path.suffix.lower()
-    if ext == ".txt" or ext == ".md":
-        return path.read_text(encoding="utf-8", errors="ignore"), "digital"
+
+    # Plain text
+    if ext in {".txt", ".md"}:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        return text, "digital"
+
+    # Word document
     if ext == ".docx":
         from docx import Document
-        return "\n".join(p.text for p in Document(path).paragraphs), "digital"
-    if ext in (".png", ".jpg", ".jpeg"):
+        doc = Document(str(path))
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(paragraphs), "digital"
+
+    # Images → OCR
+    if ext in {".png", ".jpg", ".jpeg"}:
         from backend.ocr import ocr_image
         return ocr_image(path), "ocr"
+
+    # PDF
     if ext == ".pdf":
         import fitz  # PyMuPDF
-        text = "\n".join(page.get_text() for page in fitz.open(path))
-        if len(text.strip()) >= MIN_CHARS:
-            return text, "digital"
-        # scanned/handwritten PDF -> OCR page by page
+
+        # First try digital text
+        doc = fitz.open(str(path))
+        digital_text = "\n".join(page.get_text("text").strip() for page in doc)
+
+        if len(digital_text.strip()) >= MIN_CHARS:
+            return digital_text, "digital"
+
+        # Scanned / handwritten PDF → OCR page by page
         from backend.ocr import get_reader
         reader = get_reader()
         pages = []
-        for i, page in enumerate(fitz.open(path)):
-            logger.info("OCR page %d", i + 1)
+
+        for i, page in enumerate(doc):
+            logger.info(f"OCR page {i + 1}")
             pix = page.get_pixmap(dpi=200)
             results = reader.readtext(pix.tobytes("png"))
-            lines = [t.strip() for _, t, c in results if t.strip() and c >= 0.3]
+            lines = [
+                text.strip()
+                for _, text, conf in results
+                if text.strip() and conf >= 0.30
+            ]
             if lines:
                 pages.append("\n".join(lines))
+
         return "\n\n".join(pages), "ocr"
+
     raise ValueError(f"Unsupported file type: {ext}")
 
 
 def chunk_text(text: str) -> list[str]:
-    """Split into overlapping pieces so search finds precise matches."""
+    """Split text into overlapping chunks"""
     chunks = []
     step = settings.chunk_size - settings.chunk_overlap
+
     for i in range(0, len(text), step):
         piece = text[i : i + settings.chunk_size].strip()
         if piece:
             chunks.append(piece)
+
     return chunks
 
 
 def process_upload(path: Path, original_name: str) -> dict:
-    """Full pipeline: extract -> chunk -> store. Returns status info."""
+    """
+    Full pipeline:
+    extract text → chunk → store
+    """
     text, method = extract_text(path)
-    if len(text.strip()) < 10:
-        return {"status": "FAILED", "error": "No readable text found in this document."}
+
+    if len(text.strip()) < 15:
+        return {
+            "status": "FAILED",
+            "error": "No readable text found in this document."
+        }
+
     chunks = chunk_text(text)
-    data = [
-        {
+
+    data = []
+    for i, t in enumerate(chunks):
+        data.append({
             "id": str(uuid.uuid4()),
             "filename": original_name,
+            "document_name": original_name,
             "chunk_index": i,
-            "text": t,
-        }
-        for i, t in enumerate(chunks)
-    ]
-    for index, chunk in enumerate(data):
-        if isinstance(chunk, dict):
-            chunk['chunk_id'] = index
-    for index, chunk in enumerate(data):
-        if isinstance(chunk, dict):
-            chunk['document_name'] = original_name
-            chunk['chunk_id'] = index
+            "chunk_id": i,
+            "text": t
+        })
+
     add_chunks(data)
-    logger.info("Indexed %d chunks from %s (%s)", len(chunks), original_name, method)
-    return {"status": "INDEXED", "extraction_method": method, "chunk_count": len(chunks)}
 
+    logger.info(
+        f"Indexed {len(chunks)} chunks from {original_name} ({method})"
+    )
 
-
+    return {
+        "status": "INDEXED",
+        "extraction_method": method,
+        "chunk_count": len(chunks)
+    }
