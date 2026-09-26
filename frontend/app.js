@@ -1,5 +1,5 @@
 ﻿const API_BASE = "http://127.0.0.1:8000";
-const HISTORY_KEY = "document_agent_history_by_document_v2";
+const HISTORY_KEY = "document_agent_history_by_document_v3";
 
 const state = {
   documents: [],
@@ -150,6 +150,20 @@ function sourcesFrom(payload) {
   return sources.map((x) => typeof x === "string" ? x : (x.filename || x.file_name || x.source || "")).filter(Boolean);
 }
 
+async function checkBackend() {
+  try {
+    const response = await fetch(`${API_BASE}/health`);
+    const payload = await response.json();
+    if (!response.ok || payload.backend !== "ok") throw new Error("Backend health check failed.");
+    if (!payload.ollama) return setStatus("Ollama offline", "error");
+    if (!payload.model_available) return setStatus(`Model missing: ${payload.model}`, "error");
+    setStatus("Ready", "ready");
+  } catch (error) {
+    setStatus("Backend offline", "error");
+    console.warn("Backend health check failed:", error);
+  }
+}
+
 async function uploadFile() {
   const file = $("fileInput").files[0];
 
@@ -216,7 +230,6 @@ async function ask(event) {
       body: JSON.stringify({
         question,
         document_name: state.selectedDocument,
-        filename: state.selectedDocument
       })
     });
 
@@ -281,4 +294,5 @@ $("question").addEventListener("keydown", (event) => {
 setTheme(state.theme);
 renderDocuments();
 renderHistory();
+checkBackend();
 
