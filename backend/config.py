@@ -24,12 +24,11 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 15
 
     # Retrieval settings (important for small models)
-    top_k: int = 4                        # how many chunks to send to the model
-    min_similarity: float = 0.12          # minimum score to accept a chunk
-
-    # Chunking settings
-    chunk_size: int = 450
-    chunk_overlap: int = 80
+    # Change these values
+    top_k: int = 3                    # was 4 → less context = faster
+    min_similarity: float = 0.15      # slightly higher
+    chunk_size: int = 350             # smaller chunks
+    chunk_overlap: int = 50
 
     # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"

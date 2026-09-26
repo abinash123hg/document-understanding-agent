@@ -61,12 +61,13 @@ I could not find the answer in this document."""
             {"role": "user", "content": user_message}
         ],
         "stream": False,
-        "options": {
-            "temperature": 0.0,
-            "top_p": 0.1,
-            "repeat_penalty": 1.15,
-            "num_predict": 400
-        }
+      "options": {
+    "temperature": 0.0,
+    "top_p": 0.1,
+    "repeat_penalty": 1.1,
+    "num_predict": 250,        # shorter answers = much faster
+    "num_ctx": 2048
+}
     }
 
     try:

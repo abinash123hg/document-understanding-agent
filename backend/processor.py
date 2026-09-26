@@ -42,29 +42,32 @@ def extract_text(path: Path) -> tuple[str, str]:
     if ext == ".pdf":
         import fitz  # PyMuPDF
 
-        # First try digital text
         doc = fitz.open(str(path))
         digital_text = "\n".join(page.get_text("text").strip() for page in doc)
 
         if len(digital_text.strip()) >= MIN_CHARS:
             return digital_text, "digital"
 
-        # Scanned / handwritten PDF → OCR page by page
+        # Faster OCR settings for scanned PDFs
         from backend.ocr import get_reader
         reader = get_reader()
         pages = []
 
         for i, page in enumerate(doc):
             logger.info(f"OCR page {i + 1}")
-            pix = page.get_pixmap(dpi=200)
-            results = reader.readtext(pix.tobytes("png"))
-            lines = [
-                text.strip()
-                for _, text, conf in results
-                if text.strip() and conf >= 0.30
-            ]
-            if lines:
-                pages.append("\n".join(lines))
+            # Lower DPI = much faster (150 is good balance)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+
+            results = reader.readtext(
+                img_bytes,
+                detail=0,
+                paragraph=True,
+                batch_size=1
+            )
+            text = "\n".join([t.strip() for t in results if t.strip()])
+            if text:
+                pages.append(text)
 
         return "\n\n".join(pages), "ocr"
 
