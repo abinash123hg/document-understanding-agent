@@ -10,4 +10,4 @@ scikit-learn
 pypdf
 python-docx
 PyMuPDF
-openai
+easyocr
