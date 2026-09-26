@@ -1,4 +1,4 @@
-"""
+﻿"""
 TF-IDF Retriever – finds the most relevant chunks
 """
 
@@ -47,7 +47,7 @@ def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[d
     results = []
     for position in order:
         score = float(scores[position])
-        if score < 0.05:          # very low threshold so it almost always finds something
+        if score < 0.08:          # very low threshold so it almost always finds something
             continue
         item = dict(chunks[indices[position]])
         item["score"] = score

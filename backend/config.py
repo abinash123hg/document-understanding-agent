@@ -1,4 +1,4 @@
-"""
+﻿"""
 Configuration – all settings for the Document Understanding Agent
 Optimized for models under 2GB
 """
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Ollama settings
     ollama_url: str = "http://127.0.0.1:11434"
-    llm_model: str = "qwen2.5:3b"          # change to qwen2.5:1.5b if you want faster
+    llm_model: str = "qwen2.5:1.5b"          # change to qwen2.5:1.5b if you want faster
 
     # CORS
     cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500"
