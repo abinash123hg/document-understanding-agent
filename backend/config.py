@@ -25,11 +25,10 @@ class Settings(BaseSettings):
 
     # Retrieval settings (important for small models)
     # Change these values
-    top_k: int = 3                    # was 4 → less context = faster
-    min_similarity: float = 0.15      # slightly higher
-    chunk_size: int = 350             # smaller chunks
-    chunk_overlap: int = 50
-
+    top_k: int = 4
+    min_similarity: float = 0.05          # ← change to 0.05
+    chunk_size: int = 400
+    chunk_overlap: int = 60
     # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"
 

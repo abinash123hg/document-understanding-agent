@@ -29,34 +29,38 @@ def _write(data: list):
 
 
 def add_chunks(chunks: list):
-    """Add new chunks to storage"""
     data = _read()
     data.extend(chunks)
     _write(data)
 
 
 def get_chunks(document_name: str = None) -> list:
-    """Return all chunks or only chunks of one document"""
     data = _read()
-    if document_name:
-        return [
-            item for item in data
-            if item.get("document_name") == document_name
-            or item.get("filename") == document_name
-        ]
-    return data
+    if not document_name:
+        return data
+
+    # Flexible matching (handles UUID prefixes and original names)
+    name = document_name.lower().strip()
+    results = []
+    for item in data:
+        fname = str(item.get("filename", "")).lower()
+        dname = str(item.get("document_name", "")).lower()
+        if name in fname or name in dname or fname in name or dname in name:
+            results.append(item)
+    return results
 
 
 def clear_document(document_name: str):
-    """Remove all chunks of one document"""
-    data = [
-        item for item in _read()
-        if item.get("document_name") != document_name
-        and item.get("filename") != document_name
-    ]
-    _write(data)
+    data = _read()
+    name = document_name.lower().strip()
+    filtered = []
+    for item in data:
+        fname = str(item.get("filename", "")).lower()
+        dname = str(item.get("document_name", "")).lower()
+        if name not in fname and name not in dname and fname not in name and dname not in name:
+            filtered.append(item)
+    _write(filtered)
 
 
 def list_chunks() -> list:
-    """Alias used by some modules"""
     return get_chunks()

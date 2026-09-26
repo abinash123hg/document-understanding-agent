@@ -1,6 +1,5 @@
 """
-TF-IDF Retriever – finds the most relevant chunks for a question
-Works well with small models under 2GB
+TF-IDF Retriever – finds the most relevant chunks
 """
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -10,15 +9,14 @@ from backend.config import settings
 
 
 def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
-    """
-    Return the most relevant chunks for the question.
-    Only returns chunks that pass the minimum similarity threshold.
-    """
     if top_k is None:
         top_k = settings.top_k
 
-    # Get chunks (optionally filtered by document)
     chunks = storage.get_chunks(document_name=document_name)
+
+    if not chunks:
+        # Fallback: try without document filter
+        chunks = storage.get_chunks()
 
     if not chunks:
         return []
@@ -31,36 +29,29 @@ def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[d
 
     indices, documents = zip(*valid)
 
-    # Build TF-IDF matrix
-    vectorizer = TfidfVectorizer(
-        lowercase=True,
-        ngram_range=(1, 2),
-        sublinear_tf=True,
-        max_features=8000
-    )
-
     try:
+        vectorizer = TfidfVectorizer(
+            lowercase=True,
+            ngram_range=(1, 2),
+            sublinear_tf=True,
+            max_features=5000
+        )
         matrix = vectorizer.fit_transform(documents)
         query_vector = vectorizer.transform([query])
         scores = cosine_similarity(query_vector, matrix).flatten()
     except Exception:
         return []
 
-    # Sort by score (highest first)
     order = scores.argsort()[::-1]
 
     results = []
     for position in order:
         score = float(scores[position])
-
-        # Only keep chunks that are similar enough
-        if score < settings.min_similarity:
+        if score < 0.05:          # very low threshold so it almost always finds something
             continue
-
         item = dict(chunks[indices[position]])
         item["score"] = score
         results.append(item)
-
         if len(results) >= top_k:
             break
 
@@ -68,5 +59,4 @@ def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[d
 
 
 def search(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
-    """Alias for retrieve – kept for compatibility"""
     return retrieve(query, top_k, document_name)
