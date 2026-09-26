@@ -1,17 +1,17 @@
 ﻿"""
 Document Understanding Agent - Main FastAPI application
-Fully offline, uses only local Ollama models under 2GB
+Strict document-only answers (no cross-document leakage)
 """
 
 import logging
 import shutil
 import uuid
 from pathlib import Path
+from typing import Optional, List
 
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend import processor, retriever, storage, llm
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Document Understanding Agent",
-    version="1.0.0",
-    description="Private document Q&A – answers only from uploaded files"
+    version="1.1.0",
+    description="Private document Q&A – answers only from the selected document"
 )
 
 app.add_middleware(
@@ -50,7 +50,7 @@ class Source(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: List[Source] = []
+    sources: List[Source] = Field(default_factory=list)
     document_name: Optional[str] = None
 
 
@@ -85,7 +85,6 @@ async def upload(file: UploadFile):
             f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
         )
 
-    # Save temporarily
     temp_path = settings.uploads_dir / f"{uuid.uuid4()}{ext}"
     try:
         with open(temp_path, "wb") as f:
@@ -123,15 +122,26 @@ def chat(request: ChatRequest):
     if not question:
         raise HTTPException(400, "Question cannot be empty")
 
-    # Retrieve only relevant chunks
+    # Retrieve ONLY from the selected document
     sources = retriever.retrieve(
         query=question,
         top_k=settings.top_k,
         document_name=request.document_name
     )
 
-    # If no good sources found → force safe answer
-    if not sources or all(s.get("score", 0) < settings.min_similarity for s in sources):
+    # No relevant chunks found → stop here
+    if not sources:
+        return ChatResponse(
+            answer="I could not find the answer in this document.",
+            sources=[],
+            document_name=request.document_name
+        )
+
+    # Optional: filter by minimum score
+    MIN_SCORE = 0.08
+    sources = [s for s in sources if float(s.get("score", 0.0)) >= MIN_SCORE]
+
+    if not sources:
         return ChatResponse(
             answer="I could not find the answer in this document.",
             sources=[],
@@ -141,34 +151,23 @@ def chat(request: ChatRequest):
     try:
         answer = llm.generate_answer(question, sources)
     except Exception as e:
-        logger.error(f"LLM error: {e}")
-        return ChatResponse(
-            answer="I could not find the answer in this document.",
-            sources=[],
-            document_name=request.document_name
-        )
-
-    # Final safety check – if model still tries to invent
-    if not answer or "could not find" in answer.lower() or "do not contain" in answer.lower():
-        return ChatResponse(
-            answer="I could not find the answer in this document.",
-            sources=[Source(**{
-                "filename": s.get("filename", ""),
-                "chunk_index": s.get("chunk_index", 0),
-                "score": s.get("score", 0.0),
-                "text": s.get("text", "")[:200]
-            }) for s in sources],
-            document_name=request.document_name
+        logger.exception("LLM generation failed")
+        raise HTTPException(
+            503,
+            "The local language model is unavailable. Please try again."
         )
 
     return ChatResponse(
         answer=answer,
-        sources=[Source(**{
-            "filename": s.get("filename", ""),
-            "chunk_index": s.get("chunk_index", 0),
-            "score": float(s.get("score", 0.0)),
-            "text": s.get("text", "")[:300]
-        }) for s in sources],
+        sources=[
+            Source(
+                filename=s.get("filename", ""),
+                chunk_index=s.get("chunk_index", 0),
+                score=float(s.get("score", 0.0)),
+                text=s.get("text", "")[:300]
+            )
+            for s in sources
+        ],
         document_name=request.document_name
     )
 
