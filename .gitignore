@@ -1,0 +1,13 @@
+﻿.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+uploads/
+tmp/
+logs/
+*.log
+data/private/
+security_audit_report.md
+efficiency_report.json

@@ -1,0 +1,283 @@
+﻿const API_BASE = "http://127.0.0.1:8000";
+const HISTORY_KEY = "document_agent_history_v1";
+
+const state = {
+  documents: [],
+  selectedDocument: null,
+  history: loadHistory()
+};
+
+const $ = (id) => document.getElementById(id);
+
+function loadHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory() {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history.slice(0, 50)));
+}
+
+function setStatus(text, kind = "ready") {
+  const element = $("status");
+  element.textContent = text;
+  element.className = `status ${kind}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[char]));
+}
+
+function renderHistory() {
+  const container = $("historyList");
+
+  if (!state.history.length) {
+    container.innerHTML = '<div class="muted">No questions yet.</div>';
+    return;
+  }
+
+  container.innerHTML = state.history.map((item, index) => `
+    <button class="history-item" data-history-index="${index}">
+      <span class="history-question">${escapeHtml(item.question)}</span>
+      <span class="history-meta">${escapeHtml(item.document || "Unknown document")} · ${escapeHtml(item.time)}</span>
+    </button>
+  `).join("");
+
+  container.querySelectorAll("[data-history-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = state.history[Number(button.dataset.historyIndex)];
+      if (!item) return;
+      addBubble("user", item.question);
+      addBubble("assistant", item.answer, item.sources);
+    });
+  });
+}
+
+function renderDocuments() {
+  const container = $("documents");
+
+  if (!state.documents.length) {
+    container.innerHTML = '<div class="muted">No document uploaded.</div>';
+    return;
+  }
+
+  container.innerHTML = state.documents.map((name) => `
+    <div class="document-item ${name === state.selectedDocument ? "active" : ""}">
+      <button data-document="${escapeHtml(name)}">${escapeHtml(name)}</button>
+    </div>
+  `).join("");
+
+  container.querySelectorAll("[data-document]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedDocument = button.dataset.document;
+      renderDocuments();
+      addBubble("assistant", `Selected document: ${state.selectedDocument}\nAsk a question about this document only.`);
+    });
+  });
+}
+
+function addBubble(role, text, sources = []) {
+  const chat = $("chat");
+  const empty = chat.querySelector(".empty-state");
+  if (empty) empty.remove();
+
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${role}`;
+
+  const safeText = escapeHtml(text);
+  const sourceList = Array.isArray(sources) ? sources.filter(Boolean) : [];
+
+  bubble.innerHTML = `
+    <span class="bubble-label">${role === "user" ? "You" : "Agent"}</span>
+    <div class="bubble-content">${safeText}</div>
+    ${
+      role === "assistant" && sourceList.length
+        ? `<div class="sources"><strong>Sources from this answer</strong><ul>${
+            sourceList.map((source) => `<li>${escapeHtml(source)}</li>`).join("")
+          }</ul></div>`
+        : ""
+    }
+  `;
+
+  chat.appendChild(bubble);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function getSourceNames(payload) {
+  const raw = payload.sources || payload.source_chunks || payload.citations || [];
+  if (!Array.isArray(raw)) return [];
+
+  return raw.map((source) => {
+    if (typeof source === "string") return source;
+    return source.filename || source.file_name || source.source || source.document || "";
+  }).filter(Boolean);
+}
+
+function getErrorMessage(payload, fallback) {
+  if (!payload) return fallback;
+  if (typeof payload === "string") return payload;
+  if (typeof payload.detail === "string") return payload.detail;
+  if (typeof payload.message === "string") return payload.message;
+  if (typeof payload.error === "string") return payload.error;
+  if (Array.isArray(payload.detail)) {
+    return payload.detail.map((item) => {
+      if (typeof item === "string") return item;
+      return item.msg || item.message || JSON.stringify(item);
+    }).join("; ");
+  }
+  if (payload.detail && typeof payload.detail === "object") {
+    return payload.detail.message ||
+      payload.detail.error ||
+      JSON.stringify(payload.detail);
+  }
+  if (payload.error && typeof payload.error === "object") {
+    return payload.error.message ||
+      JSON.stringify(payload.error);
+  }
+  return fallback;
+}
+
+function getAnswer(payload) {
+  if (!payload || typeof payload !== "object") {
+    return String(payload || "No answer returned.");
+  }
+  if (typeof payload.answer === "string") return payload.answer;
+  if (typeof payload.response === "string") return payload.response;
+  if (typeof payload.message === "string") return payload.message;
+  if (typeof payload.result === "string") return payload.result;
+  return "No answer returned.";
+}
+
+async function uploadFiles() {
+  const files = $("fileInput").files;
+  if (!files.length) {
+    $("uploadStatus").textContent = "Choose at least one file.";
+    $("uploadStatus").className = "message error";
+    return;
+  }
+
+  const formData = new FormData();
+  Array.from(files).forEach((file) => formData.append("files", file));
+
+  setStatus("Uploading", "busy");
+  $("uploadStatus").textContent = "Processing document...";
+  $("uploadStatus").className = "message";
+
+  try {
+    const response = await fetch(`${API_BASE}/upload`, {
+      method: "POST",
+      body: formData
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `Upload failed (${response.status})`));
+    }
+
+    const uploaded = Array.isArray(payload.files)
+      ? payload.files
+      : Array.from(files).map((file) => file.name);
+
+    state.documents = [...new Set([...state.documents, ...uploaded])];
+    state.selectedDocument = uploaded[0] || state.selectedDocument;
+
+    state.history = [];
+    saveHistory();
+    renderHistory();
+    renderDocuments();
+
+    const chunks = payload.chunks_processed || payload.chunk_count || payload.chunks;
+    $("uploadStatus").textContent = `Uploaded: ${uploaded.join(", ")}${chunks ? ` · ${chunks} chunks processed` : ""}`;
+    $("uploadStatus").className = "message success";
+    $("question").disabled = false;
+    $("askBtn").disabled = false;
+    $("chat").innerHTML = "";
+    addBubble("assistant", `Ready. I will answer only from: ${state.selectedDocument}`);
+    setStatus("Ready", "ready");
+  } catch (error) {
+    $("uploadStatus").textContent = `Upload failed: ${error.message}`;
+    $("uploadStatus").className = "message error";
+    setStatus("Backend error", "error");
+  }
+}
+
+async function askQuestion(event) {
+  event.preventDefault();
+
+  const question = $("question").value.trim();
+  if (!question || !state.selectedDocument) return;
+
+  addBubble("user", question);
+  $("question").value = "";
+  $("askBtn").disabled = true;
+  setStatus("Thinking", "busy");
+
+  try {
+    const response = await fetch(`${API_BASE}/chat`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        question,
+        document_name: state.selectedDocument,
+        filename: state.selectedDocument
+      })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `Request failed (${response.status})`));
+    }
+
+    const answer = getAnswer(payload);
+    const sources = getSourceNames(payload);
+
+    addBubble("assistant", answer, sources);
+
+    state.history.unshift({
+      question,
+      answer,
+      sources,
+      document: state.selectedDocument,
+      time: new Date().toLocaleString()
+    });
+
+    saveHistory();
+    renderHistory();
+    setStatus("Ready", "ready");
+  } catch (error) {
+    const answer = `I could not complete that question safely.\n\n${error.message}`;
+    addBubble("assistant", answer);
+    setStatus("Backend error", "error");
+  } finally {
+    $("askBtn").disabled = false;
+  }
+}
+
+$("uploadBtn").addEventListener("click", uploadFiles);
+$("chatForm").addEventListener("submit", askQuestion);
+$("clearHistoryBtn").addEventListener("click", () => {
+  state.history = [];
+  saveHistory();
+  renderHistory();
+});
+
+$("question").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    $("chatForm").requestSubmit();
+  }
+});
+
+renderHistory();
+renderDocuments();
+

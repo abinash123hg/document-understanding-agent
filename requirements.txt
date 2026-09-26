@@ -1,0 +1,13 @@
+﻿fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+pydantic
+pydantic-settings
+requests
+numpy
+scikit-learn
+pypdf
+python-docx
+PyMuPDF
+openai

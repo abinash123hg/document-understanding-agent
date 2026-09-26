@@ -1,0 +1,59 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Understanding Agent</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>Document Understanding Agent</h1>
+        <p>Private document chat · runs on your machine</p>
+      </div>
+      <span id="status" class="status ready">Ready</span>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel upload-panel">
+          <h2>Upload documents</h2>
+          <p class="muted">PDF, DOCX, TXT, MD and images</p>
+          <input id="fileInput" type="file" multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg">
+          <button id="uploadBtn" class="primary">Upload selected files</button>
+          <div id="uploadStatus" class="message"></div>
+          <div id="documents" class="documents"></div>
+        </section>
+
+        <section class="panel history-panel">
+          <div class="panel-heading">
+            <h2>History</h2>
+            <button id="clearHistoryBtn" class="small-button">Clear</button>
+          </div>
+          <p class="muted">Questions saved only in this browser.</p>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </aside>
+
+      <section class="chat-panel">
+        <div id="chat" class="chat" aria-live="polite">
+          <div class="empty-state">
+            <h2>Ask about your document</h2>
+            <p>Upload one document, then ask a clear question.</p>
+          </div>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="question" rows="3" placeholder="Ask something about the selected document..." disabled></textarea>
+          <button id="askBtn" class="primary" type="submit" disabled>Ask</button>
+        </form>
+        <p class="hint">Press Enter to send · Shift+Enter for a new line</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

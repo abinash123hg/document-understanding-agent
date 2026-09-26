@@ -1,0 +1,30 @@
+﻿"""JSON-file storage for chunks. Simple, no database needed."""
+import json
+import threading
+from backend.config import settings
+
+_lock = threading.Lock()
+CHUNKS_FILE = settings.data_dir / "chunks.json"
+
+
+def _read() -> list[dict]:
+    if not CHUNKS_FILE.exists():
+        return []
+    return json.loads(CHUNKS_FILE.read_text(encoding='utf-8-sig'))
+
+
+def add_chunks(chunks: list[dict]):
+    with _lock:
+        data = _read()
+        data.extend(chunks)
+        CHUNKS_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8-sig')
+
+
+def list_chunks() -> list[dict]:
+    return _read()
+
+
+def clear_all():
+    with _lock:
+        CHUNKS_FILE.write_text("[]", encoding='utf-8-sig')
+
