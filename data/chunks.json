@@ -3798,5 +3798,469 @@
     "chunk_index": 19,
     "chunk_id": 19,
     "text": "Reference Books\n•  Bird, S., Klein, E., & Loper, E. — Natural Language Processing with Python. O'Reilly, 2009. [Free online: nltk.org/book]\n•  Huyen, C. — Designing Machine Learning Systems. O'Reilly, 2022.\n•  Scikit-learn documentation — https://scikit-learn.org\n•  Hugging Face documentation — https://huggingface.co/docs"
+  },
+  {
+    "id": "284d71b7-ca61-4088-90d7-baa38e426fb7",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "Agriculture — Key Details (Wikipedia Summary)\nDefinition: Agriculture is the practice of cultivating soil, planting, raising, and harvesting food and non-food crops, plus livestock production. Broad definitions add forestry and aquaculture. The word comes from Latin ager (field) + cultura (cultivation).\nHISTORY\n- Grains gathered by humans from at least 105,000 years ago; planting began around 11,5"
+  },
+  {
+    "id": "83eefa7f-7118-4e03-813e-25b3cae922a4",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 1,
+    "chunk_id": 1,
+    "text": "from at least 105,000 years ago; planting began around 11,500 years ago.\n- Domestication: sheep, goats, pigs, cattle around 10,000 years ago; agriculture arose independently in at least 11 regions of the world.\n- Early centers: rice in China (~5700 BC), wheat/barley in Mesopotamia, Egypt, and the Indus Valley; maize from teosinte in Mesoamerica; potato in the Andes.\n- Key advances: Sumerian irrig"
+  },
+  {
+    "id": "6088c92c-e59f-4990-aaa7-a6958d3e4be7",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 2,
+    "chunk_id": 2,
+    "text": "america; potato in the Andes.\n- Key advances: Sumerian irrigation (~8000 BC), Egyptian Nile farming, Chinese granaries and ploughs, the Arab Agricultural Revolution, the Columbian Exchange (1492), and the British Agricultural Revolution (17th century).\n- 20th century: industrial agriculture based on large-scale monocultures came to dominate output; the Haber-Bosch process enabled synthetic fertili"
+  },
+  {
+    "id": "d5613a90-2f85-4445-961b-92edb034aa0d",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 3,
+    "chunk_id": 3,
+    "text": "te output; the Haber-Bosch process enabled synthetic fertilizer and huge yield gains.\nFARM TYPES\n- Pastoralism: herding livestock, moved in search of pasture (arid regions).\n- Shifting cultivation: clear/burn forest, farm a few years, then move on.\n- Subsistence farming: grown for family/local needs (~2.5 billion farmers, ~60% of arable land).\n- Intensive farming: maximize output with low fallow a"
+  },
+  {
+    "id": "4f913599-afa0-4015-8880-732e009de542",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 4,
+    "chunk_id": 4,
+    "text": "and).\n- Intensive farming: maximize output with low fallow and high inputs (developed countries).\nFARM SIZES AND WORKFORCE\n- Small farms (2 hectares or less) are 5 of every 6 farms worldwide but hold only ~12% of farmland; farms over 50 ha are just 1% of farms yet cover over 70% of farmland. Small farms still produce about one-third of the world's food.\n- Employment: 916 million people (2023), ~27"
+  },
+  {
+    "id": "7ff44f0a-da49-4f0d-aa99-ef39e82fc419",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 5,
+    "chunk_id": 5,
+    "text": "e world's food.\n- Employment: 916 million people (2023), ~27% of the global workforce (40% in 2000). Agriculture is about 4% of global GDP.\n- Women are ~47% of the agricultural workforce in sub-Saharan Africa and earn ~18% less than men in farm wages.\nPRODUCTION\n- Global output: about 11 billion tonnes of food, 32 million tonnes of natural fibres, 4 billion cubic metres of wood per year; ~14% of f"
+  },
+  {
+    "id": "80e9b2b5-2f7d-457a-a4d6-f487525b6ad9",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 6,
+    "chunk_id": 6,
+    "text": "l fibres, 4 billion cubic metres of wood per year; ~14% of food is lost before retail.\n- Top crops (million tonnes): sugarcane 1,794; maize 883; rice 722; wheat 704; potatoes 374.\n- Largest producers by output: China, India, EU, USA, Brazil.\n- Livestock systems: grassland-based, mixed, and landless (factory farming — 75% of future growth expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agr"
+  },
+  {
+    "id": "ddfebc01-236c-4c82-9b83-02e836c7cbf9",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 7,
+    "chunk_id": 7,
+    "text": "expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agriculture covers 4.8 billion hectares — one-third of Earth's land surface — the biggest human impact on land and water of any sector.\n- Uses ~70% of global freshwater withdrawals; 64% of agricultural land is at risk of pesticide pollution.\n- Contributes 13-21% of global greenhouse gas emissions; livestock alone is about 18% (CO2-eq), plus"
+  },
+  {
+    "id": "16e6d739-498c-4f6f-a4da-9f2da8c99229",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 8,
+    "chunk_id": 8,
+    "text": "gas emissions; livestock alone is about 18% (CO2-eq), plus 37% of methane and 65% of ammonia.\n- Drives ~90% of deforestation; ~40% of agricultural land is seriously degraded.\n- Pesticide use rose 62% (2000-2021); ~3 million pesticide poisonings/year with 220,000 deaths (WHO, 1992).\n- Plastic (agriplastic films, mulch) adds major soil microplastic contamination (50-260 kg/ha in old mulch areas).\nC"
+  },
+  {
+    "id": "e2548091-a137-4c59-a601-d557248103f6",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 9,
+    "chunk_id": 9,
+    "text": "roplastic contamination (50-260 kg/ha in old mulch areas).\nCLIMATE CHANGE\n- Warming has already slowed agricultural productivity growth over the past 50 years in mid/low latitudes (IPCC 2022).\n- At just 1.5 C warming, large crop areas enter danger zones — near 50% of cropland in the Middle East/North Africa.\n- FAO estimates agriculture must produce ~50% more food, feed and fibre by 2050 compared w"
+  },
+  {
+    "id": "ed86d922-b32e-4187-94cf-3e353adf1397",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 10,
+    "chunk_id": 10,
+    "text": "st produce ~50% more food, feed and fibre by 2050 compared with 2012.\n- Disasters cost agriculture US$3.26 trillion (1991-2023), about US$99 billion per year.\nBIOTECHNOLOGY AND SAFETY\n- GMO crops (herbicide-tolerant, insect-resistant/Bt) are widely used; some countries ban them; EU labelling since 1997, US labelling since 2022.\n- Plant breeding (Mendel-based genetics, Green Revolution hybrids) lif"
+  },
+  {
+    "id": "58f31c14-bfbe-4c8b-a24e-295e7ab90cdd",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 11,
+    "chunk_id": 11,
+    "text": "eeding (Mendel-based genetics, Green Revolution hybrids) lifted wheat yields from under 1 t/ha (1900) to over 2.5 t/ha (1990); US maize from ~2.5 to ~9.4 t/ha.\n- Safety: agriculture is among the most hazardous industries — at least 170,000 work deaths/year (ILO), twice the average of other jobs; tractor rollovers are a leading killer.\nSUSTAINABILITY AND POLICY\n- Movements: organic (EU certified si"
+  },
+  {
+    "id": "e74d3aeb-0a5a-48fa-9715-3e94795c7826",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 12,
+    "chunk_id": 12,
+    "text": "TAINABILITY AND POLICY\n- Movements: organic (EU certified since 1991), regenerative, and sustainable agriculture; conservation tillage, agroforestry, and precision/robotic automation improve efficiency.\n- Global producer support is about US$540 billion/year (15% of production value), often inefficient and environmentally harmful.\n- Future focus: automation with AI/robots, water-efficient precision"
+  },
+  {
+    "id": "c45b5079-4723-42b3-8842-602e910347af",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 13,
+    "chunk_id": 13,
+    "text": "focus: automation with AI/robots, water-efficient precision farming, and closing gender gaps in land, inputs, and technology access.\nSource: Wikipedia — Agriculture, page last edited 23 September 2026."
+  },
+  {
+    "id": "7af99eff-41d1-42af-a6bc-5410fd75d45d",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "Agriculture — Key Details (Wikipedia Summary)\nDefinition: Agriculture is the practice of cultivating soil, planting, raising, and harvesting food and non-food crops, plus livestock production. Broad definitions add forestry and aquaculture. The word comes from Latin ager (field) + cultura (cultivation).\nHISTORY\n- Grains gathered by humans from at least 105,000 years ago; planting began around 11,5"
+  },
+  {
+    "id": "f63d04ac-86cb-4ba1-8ead-5655b16e2ba5",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 1,
+    "chunk_id": 1,
+    "text": "from at least 105,000 years ago; planting began around 11,500 years ago.\n- Domestication: sheep, goats, pigs, cattle around 10,000 years ago; agriculture arose independently in at least 11 regions of the world.\n- Early centers: rice in China (~5700 BC), wheat/barley in Mesopotamia, Egypt, and the Indus Valley; maize from teosinte in Mesoamerica; potato in the Andes.\n- Key advances: Sumerian irrig"
+  },
+  {
+    "id": "a00131f7-2637-42b9-8229-cecf498a990f",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 2,
+    "chunk_id": 2,
+    "text": "america; potato in the Andes.\n- Key advances: Sumerian irrigation (~8000 BC), Egyptian Nile farming, Chinese granaries and ploughs, the Arab Agricultural Revolution, the Columbian Exchange (1492), and the British Agricultural Revolution (17th century).\n- 20th century: industrial agriculture based on large-scale monocultures came to dominate output; the Haber-Bosch process enabled synthetic fertili"
+  },
+  {
+    "id": "6618f668-3323-43c2-9fd2-a1a199e5d1b6",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 3,
+    "chunk_id": 3,
+    "text": "te output; the Haber-Bosch process enabled synthetic fertilizer and huge yield gains.\nFARM TYPES\n- Pastoralism: herding livestock, moved in search of pasture (arid regions).\n- Shifting cultivation: clear/burn forest, farm a few years, then move on.\n- Subsistence farming: grown for family/local needs (~2.5 billion farmers, ~60% of arable land).\n- Intensive farming: maximize output with low fallow a"
+  },
+  {
+    "id": "7fcda7f3-2a92-4ae1-9185-d64d68df2593",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 4,
+    "chunk_id": 4,
+    "text": "and).\n- Intensive farming: maximize output with low fallow and high inputs (developed countries).\nFARM SIZES AND WORKFORCE\n- Small farms (2 hectares or less) are 5 of every 6 farms worldwide but hold only ~12% of farmland; farms over 50 ha are just 1% of farms yet cover over 70% of farmland. Small farms still produce about one-third of the world's food.\n- Employment: 916 million people (2023), ~27"
+  },
+  {
+    "id": "caa40fd8-1836-46fa-8272-0de7fd5ca4f8",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 5,
+    "chunk_id": 5,
+    "text": "e world's food.\n- Employment: 916 million people (2023), ~27% of the global workforce (40% in 2000). Agriculture is about 4% of global GDP.\n- Women are ~47% of the agricultural workforce in sub-Saharan Africa and earn ~18% less than men in farm wages.\nPRODUCTION\n- Global output: about 11 billion tonnes of food, 32 million tonnes of natural fibres, 4 billion cubic metres of wood per year; ~14% of f"
+  },
+  {
+    "id": "8d0ffe47-ca21-4220-b9a2-06fb5fd9818d",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 6,
+    "chunk_id": 6,
+    "text": "l fibres, 4 billion cubic metres of wood per year; ~14% of food is lost before retail.\n- Top crops (million tonnes): sugarcane 1,794; maize 883; rice 722; wheat 704; potatoes 374.\n- Largest producers by output: China, India, EU, USA, Brazil.\n- Livestock systems: grassland-based, mixed, and landless (factory farming — 75% of future growth expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agr"
+  },
+  {
+    "id": "51cd654b-013e-4835-9ba2-db0fbb2cc8d2",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 7,
+    "chunk_id": 7,
+    "text": "expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agriculture covers 4.8 billion hectares — one-third of Earth's land surface — the biggest human impact on land and water of any sector.\n- Uses ~70% of global freshwater withdrawals; 64% of agricultural land is at risk of pesticide pollution.\n- Contributes 13-21% of global greenhouse gas emissions; livestock alone is about 18% (CO2-eq), plus"
+  },
+  {
+    "id": "4a346f1f-f438-4037-9262-d75423779aea",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 8,
+    "chunk_id": 8,
+    "text": "gas emissions; livestock alone is about 18% (CO2-eq), plus 37% of methane and 65% of ammonia.\n- Drives ~90% of deforestation; ~40% of agricultural land is seriously degraded.\n- Pesticide use rose 62% (2000-2021); ~3 million pesticide poisonings/year with 220,000 deaths (WHO, 1992).\n- Plastic (agriplastic films, mulch) adds major soil microplastic contamination (50-260 kg/ha in old mulch areas).\nC"
+  },
+  {
+    "id": "fe46bf54-1ca2-45f1-8da5-17dc2e7bba3b",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 9,
+    "chunk_id": 9,
+    "text": "roplastic contamination (50-260 kg/ha in old mulch areas).\nCLIMATE CHANGE\n- Warming has already slowed agricultural productivity growth over the past 50 years in mid/low latitudes (IPCC 2022).\n- At just 1.5 C warming, large crop areas enter danger zones — near 50% of cropland in the Middle East/North Africa.\n- FAO estimates agriculture must produce ~50% more food, feed and fibre by 2050 compared w"
+  },
+  {
+    "id": "c4ee0347-3bf1-45df-8156-3f6253d8a1c3",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 10,
+    "chunk_id": 10,
+    "text": "st produce ~50% more food, feed and fibre by 2050 compared with 2012.\n- Disasters cost agriculture US$3.26 trillion (1991-2023), about US$99 billion per year.\nBIOTECHNOLOGY AND SAFETY\n- GMO crops (herbicide-tolerant, insect-resistant/Bt) are widely used; some countries ban them; EU labelling since 1997, US labelling since 2022.\n- Plant breeding (Mendel-based genetics, Green Revolution hybrids) lif"
+  },
+  {
+    "id": "294d75c8-012b-4db3-8908-9c6f5fb219b5",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 11,
+    "chunk_id": 11,
+    "text": "eeding (Mendel-based genetics, Green Revolution hybrids) lifted wheat yields from under 1 t/ha (1900) to over 2.5 t/ha (1990); US maize from ~2.5 to ~9.4 t/ha.\n- Safety: agriculture is among the most hazardous industries — at least 170,000 work deaths/year (ILO), twice the average of other jobs; tractor rollovers are a leading killer.\nSUSTAINABILITY AND POLICY\n- Movements: organic (EU certified si"
+  },
+  {
+    "id": "824ee7ef-8538-44b2-947c-eeec935f9d4a",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 12,
+    "chunk_id": 12,
+    "text": "TAINABILITY AND POLICY\n- Movements: organic (EU certified since 1991), regenerative, and sustainable agriculture; conservation tillage, agroforestry, and precision/robotic automation improve efficiency.\n- Global producer support is about US$540 billion/year (15% of production value), often inefficient and environmentally harmful.\n- Future focus: automation with AI/robots, water-efficient precision"
+  },
+  {
+    "id": "baa4f0ec-7171-4ad7-bb67-de4e7af26b35",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 13,
+    "chunk_id": 13,
+    "text": "focus: automation with AI/robots, water-efficient precision farming, and closing gender gaps in land, inputs, and technology access.\nSource: Wikipedia — Agriculture, page last edited 23 September 2026."
+  },
+  {
+    "id": "412cc5df-9e34-4b0c-b80d-0ab45398fa65",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "Agriculture — Key Details (Wikipedia Summary)\nDefinition: Agriculture is the practice of cultivating soil, planting, raising, and harvesting food and non-food crops, plus livestock production. Broad definitions add forestry and aquaculture. The word comes from Latin ager (field) + cultura (cultivation).\nHISTORY\n- Grains gathered by humans from at least 105,000 years ago; planting began around 11,5"
+  },
+  {
+    "id": "ca0594d7-8f64-4199-9730-59b18a6e90d6",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 1,
+    "chunk_id": 1,
+    "text": "from at least 105,000 years ago; planting began around 11,500 years ago.\n- Domestication: sheep, goats, pigs, cattle around 10,000 years ago; agriculture arose independently in at least 11 regions of the world.\n- Early centers: rice in China (~5700 BC), wheat/barley in Mesopotamia, Egypt, and the Indus Valley; maize from teosinte in Mesoamerica; potato in the Andes.\n- Key advances: Sumerian irrig"
+  },
+  {
+    "id": "5b6be22e-96ea-42a3-9114-228ec221f3f6",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 2,
+    "chunk_id": 2,
+    "text": "america; potato in the Andes.\n- Key advances: Sumerian irrigation (~8000 BC), Egyptian Nile farming, Chinese granaries and ploughs, the Arab Agricultural Revolution, the Columbian Exchange (1492), and the British Agricultural Revolution (17th century).\n- 20th century: industrial agriculture based on large-scale monocultures came to dominate output; the Haber-Bosch process enabled synthetic fertili"
+  },
+  {
+    "id": "45a9fcef-d12a-4441-a1f8-c2c091e2db50",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 3,
+    "chunk_id": 3,
+    "text": "te output; the Haber-Bosch process enabled synthetic fertilizer and huge yield gains.\nFARM TYPES\n- Pastoralism: herding livestock, moved in search of pasture (arid regions).\n- Shifting cultivation: clear/burn forest, farm a few years, then move on.\n- Subsistence farming: grown for family/local needs (~2.5 billion farmers, ~60% of arable land).\n- Intensive farming: maximize output with low fallow a"
+  },
+  {
+    "id": "52e6881c-d7d3-4a99-a218-8c1a1cbc6f0b",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 4,
+    "chunk_id": 4,
+    "text": "and).\n- Intensive farming: maximize output with low fallow and high inputs (developed countries).\nFARM SIZES AND WORKFORCE\n- Small farms (2 hectares or less) are 5 of every 6 farms worldwide but hold only ~12% of farmland; farms over 50 ha are just 1% of farms yet cover over 70% of farmland. Small farms still produce about one-third of the world's food.\n- Employment: 916 million people (2023), ~27"
+  },
+  {
+    "id": "81f99c0f-bbf4-4375-9813-47fa2bcb754c",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 5,
+    "chunk_id": 5,
+    "text": "e world's food.\n- Employment: 916 million people (2023), ~27% of the global workforce (40% in 2000). Agriculture is about 4% of global GDP.\n- Women are ~47% of the agricultural workforce in sub-Saharan Africa and earn ~18% less than men in farm wages.\nPRODUCTION\n- Global output: about 11 billion tonnes of food, 32 million tonnes of natural fibres, 4 billion cubic metres of wood per year; ~14% of f"
+  },
+  {
+    "id": "f2f482ee-77b4-4184-8248-815d10097b87",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 6,
+    "chunk_id": 6,
+    "text": "l fibres, 4 billion cubic metres of wood per year; ~14% of food is lost before retail.\n- Top crops (million tonnes): sugarcane 1,794; maize 883; rice 722; wheat 704; potatoes 374.\n- Largest producers by output: China, India, EU, USA, Brazil.\n- Livestock systems: grassland-based, mixed, and landless (factory farming — 75% of future growth expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agr"
+  },
+  {
+    "id": "b58723b7-f286-40bd-a053-f63d9c49cd6e",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 7,
+    "chunk_id": 7,
+    "text": "expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agriculture covers 4.8 billion hectares — one-third of Earth's land surface — the biggest human impact on land and water of any sector.\n- Uses ~70% of global freshwater withdrawals; 64% of agricultural land is at risk of pesticide pollution.\n- Contributes 13-21% of global greenhouse gas emissions; livestock alone is about 18% (CO2-eq), plus"
+  },
+  {
+    "id": "97736c5a-c609-4a02-a0de-82f269d19103",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 8,
+    "chunk_id": 8,
+    "text": "gas emissions; livestock alone is about 18% (CO2-eq), plus 37% of methane and 65% of ammonia.\n- Drives ~90% of deforestation; ~40% of agricultural land is seriously degraded.\n- Pesticide use rose 62% (2000-2021); ~3 million pesticide poisonings/year with 220,000 deaths (WHO, 1992).\n- Plastic (agriplastic films, mulch) adds major soil microplastic contamination (50-260 kg/ha in old mulch areas).\nC"
+  },
+  {
+    "id": "ceadf75b-e7d6-4637-9556-aba631b5cace",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 9,
+    "chunk_id": 9,
+    "text": "roplastic contamination (50-260 kg/ha in old mulch areas).\nCLIMATE CHANGE\n- Warming has already slowed agricultural productivity growth over the past 50 years in mid/low latitudes (IPCC 2022).\n- At just 1.5 C warming, large crop areas enter danger zones — near 50% of cropland in the Middle East/North Africa.\n- FAO estimates agriculture must produce ~50% more food, feed and fibre by 2050 compared w"
+  },
+  {
+    "id": "bd931bc2-60c7-4ac2-9af2-e43dc4fce5dc",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 10,
+    "chunk_id": 10,
+    "text": "st produce ~50% more food, feed and fibre by 2050 compared with 2012.\n- Disasters cost agriculture US$3.26 trillion (1991-2023), about US$99 billion per year.\nBIOTECHNOLOGY AND SAFETY\n- GMO crops (herbicide-tolerant, insect-resistant/Bt) are widely used; some countries ban them; EU labelling since 1997, US labelling since 2022.\n- Plant breeding (Mendel-based genetics, Green Revolution hybrids) lif"
+  },
+  {
+    "id": "abc46da5-2f98-40d5-a47c-4c2dcacec4fc",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 11,
+    "chunk_id": 11,
+    "text": "eeding (Mendel-based genetics, Green Revolution hybrids) lifted wheat yields from under 1 t/ha (1900) to over 2.5 t/ha (1990); US maize from ~2.5 to ~9.4 t/ha.\n- Safety: agriculture is among the most hazardous industries — at least 170,000 work deaths/year (ILO), twice the average of other jobs; tractor rollovers are a leading killer.\nSUSTAINABILITY AND POLICY\n- Movements: organic (EU certified si"
+  },
+  {
+    "id": "32ea1eb0-d10a-4659-818f-520f142be488",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 12,
+    "chunk_id": 12,
+    "text": "TAINABILITY AND POLICY\n- Movements: organic (EU certified since 1991), regenerative, and sustainable agriculture; conservation tillage, agroforestry, and precision/robotic automation improve efficiency.\n- Global producer support is about US$540 billion/year (15% of production value), often inefficient and environmentally harmful.\n- Future focus: automation with AI/robots, water-efficient precision"
+  },
+  {
+    "id": "3020cc37-876b-4df9-8972-effa8445d3b2",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 13,
+    "chunk_id": 13,
+    "text": "focus: automation with AI/robots, water-efficient precision farming, and closing gender gaps in land, inputs, and technology access.\nSource: Wikipedia — Agriculture, page last edited 23 September 2026."
+  },
+  {
+    "id": "32b3ec63-1783-4c42-8b76-32a79c9c8bbe",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "Agriculture — Key Details (Wikipedia Summary)\nDefinition: Agriculture is the practice of cultivating soil, planting, raising, and harvesting food and non-food crops, plus livestock production. Broad definitions add forestry and aquaculture. The word comes from Latin ager (field) + cultura (cultivation).\nHISTORY\n- Grains gathered by humans from at least 105,000 years ago; planting began around 11,5"
+  },
+  {
+    "id": "8cb80f3b-f9f4-4bae-aeab-90b9b6edcb98",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 1,
+    "chunk_id": 1,
+    "text": "from at least 105,000 years ago; planting began around 11,500 years ago.\n- Domestication: sheep, goats, pigs, cattle around 10,000 years ago; agriculture arose independently in at least 11 regions of the world.\n- Early centers: rice in China (~5700 BC), wheat/barley in Mesopotamia, Egypt, and the Indus Valley; maize from teosinte in Mesoamerica; potato in the Andes.\n- Key advances: Sumerian irrig"
+  },
+  {
+    "id": "79204edd-d58f-4da5-9fa2-04a15198d78a",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 2,
+    "chunk_id": 2,
+    "text": "america; potato in the Andes.\n- Key advances: Sumerian irrigation (~8000 BC), Egyptian Nile farming, Chinese granaries and ploughs, the Arab Agricultural Revolution, the Columbian Exchange (1492), and the British Agricultural Revolution (17th century).\n- 20th century: industrial agriculture based on large-scale monocultures came to dominate output; the Haber-Bosch process enabled synthetic fertili"
+  },
+  {
+    "id": "198f1626-9743-4b2d-a4a4-7cdf8c890702",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 3,
+    "chunk_id": 3,
+    "text": "te output; the Haber-Bosch process enabled synthetic fertilizer and huge yield gains.\nFARM TYPES\n- Pastoralism: herding livestock, moved in search of pasture (arid regions).\n- Shifting cultivation: clear/burn forest, farm a few years, then move on.\n- Subsistence farming: grown for family/local needs (~2.5 billion farmers, ~60% of arable land).\n- Intensive farming: maximize output with low fallow a"
+  },
+  {
+    "id": "9f29da12-ea47-424f-9f4a-e3c4c5fbe356",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 4,
+    "chunk_id": 4,
+    "text": "and).\n- Intensive farming: maximize output with low fallow and high inputs (developed countries).\nFARM SIZES AND WORKFORCE\n- Small farms (2 hectares or less) are 5 of every 6 farms worldwide but hold only ~12% of farmland; farms over 50 ha are just 1% of farms yet cover over 70% of farmland. Small farms still produce about one-third of the world's food.\n- Employment: 916 million people (2023), ~27"
+  },
+  {
+    "id": "2b102e34-8500-4733-9d20-53307742c502",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 5,
+    "chunk_id": 5,
+    "text": "e world's food.\n- Employment: 916 million people (2023), ~27% of the global workforce (40% in 2000). Agriculture is about 4% of global GDP.\n- Women are ~47% of the agricultural workforce in sub-Saharan Africa and earn ~18% less than men in farm wages.\nPRODUCTION\n- Global output: about 11 billion tonnes of food, 32 million tonnes of natural fibres, 4 billion cubic metres of wood per year; ~14% of f"
+  },
+  {
+    "id": "21691b37-a669-4401-b164-8337e42465e3",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 6,
+    "chunk_id": 6,
+    "text": "l fibres, 4 billion cubic metres of wood per year; ~14% of food is lost before retail.\n- Top crops (million tonnes): sugarcane 1,794; maize 883; rice 722; wheat 704; potatoes 374.\n- Largest producers by output: China, India, EU, USA, Brazil.\n- Livestock systems: grassland-based, mixed, and landless (factory farming — 75% of future growth expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agr"
+  },
+  {
+    "id": "4e361d87-78d3-499d-915c-ac79ce22d5f8",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 7,
+    "chunk_id": 7,
+    "text": "expected in confined operations).\nENVIRONMENTAL IMPACT\n- Agriculture covers 4.8 billion hectares — one-third of Earth's land surface — the biggest human impact on land and water of any sector.\n- Uses ~70% of global freshwater withdrawals; 64% of agricultural land is at risk of pesticide pollution.\n- Contributes 13-21% of global greenhouse gas emissions; livestock alone is about 18% (CO2-eq), plus"
+  },
+  {
+    "id": "f1b52459-ff32-4432-a1a0-584852cacdcb",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 8,
+    "chunk_id": 8,
+    "text": "gas emissions; livestock alone is about 18% (CO2-eq), plus 37% of methane and 65% of ammonia.\n- Drives ~90% of deforestation; ~40% of agricultural land is seriously degraded.\n- Pesticide use rose 62% (2000-2021); ~3 million pesticide poisonings/year with 220,000 deaths (WHO, 1992).\n- Plastic (agriplastic films, mulch) adds major soil microplastic contamination (50-260 kg/ha in old mulch areas).\nC"
+  },
+  {
+    "id": "ef8ac707-0228-4683-9c34-dcdd11fb2022",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 9,
+    "chunk_id": 9,
+    "text": "roplastic contamination (50-260 kg/ha in old mulch areas).\nCLIMATE CHANGE\n- Warming has already slowed agricultural productivity growth over the past 50 years in mid/low latitudes (IPCC 2022).\n- At just 1.5 C warming, large crop areas enter danger zones — near 50% of cropland in the Middle East/North Africa.\n- FAO estimates agriculture must produce ~50% more food, feed and fibre by 2050 compared w"
+  },
+  {
+    "id": "f96d4aab-80dd-41cb-8f95-e418de8f17f9",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 10,
+    "chunk_id": 10,
+    "text": "st produce ~50% more food, feed and fibre by 2050 compared with 2012.\n- Disasters cost agriculture US$3.26 trillion (1991-2023), about US$99 billion per year.\nBIOTECHNOLOGY AND SAFETY\n- GMO crops (herbicide-tolerant, insect-resistant/Bt) are widely used; some countries ban them; EU labelling since 1997, US labelling since 2022.\n- Plant breeding (Mendel-based genetics, Green Revolution hybrids) lif"
+  },
+  {
+    "id": "f5983c2b-1689-4001-8d6f-6f4f96f45fae",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 11,
+    "chunk_id": 11,
+    "text": "eeding (Mendel-based genetics, Green Revolution hybrids) lifted wheat yields from under 1 t/ha (1900) to over 2.5 t/ha (1990); US maize from ~2.5 to ~9.4 t/ha.\n- Safety: agriculture is among the most hazardous industries — at least 170,000 work deaths/year (ILO), twice the average of other jobs; tractor rollovers are a leading killer.\nSUSTAINABILITY AND POLICY\n- Movements: organic (EU certified si"
+  },
+  {
+    "id": "58157a80-bacf-43f7-a173-2ad68fe2c446",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 12,
+    "chunk_id": 12,
+    "text": "TAINABILITY AND POLICY\n- Movements: organic (EU certified since 1991), regenerative, and sustainable agriculture; conservation tillage, agroforestry, and precision/robotic automation improve efficiency.\n- Global producer support is about US$540 billion/year (15% of production value), often inefficient and environmentally harmful.\n- Future focus: automation with AI/robots, water-efficient precision"
+  },
+  {
+    "id": "440a0e39-2da2-40be-b3d0-6fddb144aef2",
+    "filename": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "document_name": "0f05165b-Agriculture_OnePage_Summary.docx",
+    "chunk_index": 13,
+    "chunk_id": 13,
+    "text": "focus: automation with AI/robots, water-efficient precision farming, and closing gender gaps in land, inputs, and technology access.\nSource: Wikipedia — Agriculture, page last edited 23 September 2026."
+  },
+  {
+    "id": "743fbc83-a463-4cf1-899d-f0ad791bec4b",
+    "filename": "gemini-2.5-flash-image_Create_a_high-end_premium_corporate_LinkedIn_banner_background_with_a_precise_as-0.jpg",
+    "document_name": "gemini-2.5-flash-image_Create_a_high-end_premium_corporate_LinkedIn_banner_background_with_a_precise_as-0.jpg",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "ABINASH SWAIN Al & ML ENGINEER LLM & RAG SPECIALIST Building intelligent, scalable Al solutions: Expert in Retrieval-Augneted Generation, Fine-Turing LLMS, and Data Science_\nTenFololox T PytTorch\n'Ilgitub.com limedin com/in abinash-swain\nRAG LLM FINE-TUINING VECTOR DATBASES"
+  },
+  {
+    "id": "1d674e75-4495-4bc0-9e3a-66019e72f9fe",
+    "filename": "ChatGPT Image Sep 4, 2026, 07_02_02 PM.png",
+    "document_name": "ChatGPT Image Sep 4, 2026, 07_02_02 PM.png",
+    "chunk_index": 0,
+    "chunk_id": 0,
+    "text": "ABINASH SWAIN Al & ML ENGINEER LLM & RAG SPECIALIST Building intelligent, scalable Al solutions: Expert in Retrieval-Augmented Generation, Fine-Tuning LLMs, and Data Science: PyTorch TensorFlow github com/abinash123hg linkedin com/in/abinash-swain-a941a3330/\nRAG\nLLM\nFINE-TUNING\nVECTOR DATABASES"
   }
 ]
