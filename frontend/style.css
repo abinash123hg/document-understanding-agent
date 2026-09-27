@@ -1045,3 +1045,27 @@ textarea:focus {
     transition-duration: 0.01ms !important;
   }
 }
+/* Light mode fix */
+html[data-theme="light"] {
+  --bg-1: #eef4ff;
+  --bg-2: #f9fbff;
+  --bg-3: #e8f0ff;
+  --glass: rgba(255,255,255,.78);
+  --text: #172033;
+  --text-muted: #53627a;
+  --text-faint: #75829a;
+  --border: rgba(45,70,110,.18);
+  --border-strong: rgba(45,70,110,.35);
+  --assistant-bubble: rgba(255,255,255,.8);
+  --user-bubble: rgba(93,124,250,.16);
+}
+html[data-theme="light"] .topbar,
+html[data-theme="light"] .composer-wrap { background: rgba(255,255,255,.72); }
+html[data-theme="light"] .theme-button,
+html[data-theme="light"] .small-button,
+html[data-theme="light"] textarea,
+html[data-theme="light"] input[type="file"],
+html[data-theme="light"] .document-item,
+html[data-theme="light"] .history-item { background: rgba(255,255,255,.72); }
+html[data-theme="light"] .source-chip,
+html[data-theme="light"] .processing-step { color:#24324a; background:rgba(229,237,255,.9); }
