@@ -1,0 +1,97 @@
+﻿"""
+Strict TF-IDF Retriever
+Returns evidence only when it is relevant to the selected document.
+"""
+
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from backend import storage
+from backend.config import settings
+
+MIN_SCORE = 0.18
+MIN_QUERY_TERMS = 1
+
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could",
+    "do", "does", "for", "from", "how", "i", "in", "is", "it", "me",
+    "my", "of", "on", "or", "please", "tell", "that", "the", "this",
+    "to", "was", "what", "when", "where", "which", "who", "why", "will",
+    "with", "would", "you", "your"
+}
+
+
+def meaningful_terms(text: str) -> set[str]:
+    return {
+        term for term in re.findall(r"[a-z0-9]{3,}", text.lower())
+        if term not in STOP_WORDS
+    }
+
+
+def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
+    if not document_name:
+        return []
+
+    if top_k is None:
+        top_k = settings.top_k
+
+    chunks = storage.get_chunks(document_name=document_name)
+
+    if not chunks:
+        return []
+
+    valid_chunks = []
+    documents = []
+
+    for chunk in chunks:
+        text = str(chunk.get("text", "")).strip()
+        if text:
+            valid_chunks.append(chunk)
+            documents.append(text)
+
+    if not documents:
+        return []
+
+    query_terms = meaningful_terms(query)
+    if not query_terms:
+        return []
+
+    try:
+        vectorizer = TfidfVectorizer(
+            lowercase=True,
+            ngram_range=(1, 2),
+            sublinear_tf=True,
+            max_features=10000,
+            stop_words="english"
+        )
+        matrix = vectorizer.fit_transform(documents)
+        query_vector = vectorizer.transform([query])
+        scores = cosine_similarity(query_vector, matrix).flatten()
+    except Exception:
+        return []
+
+    results = []
+    for position in scores.argsort()[::-1]:
+        score = float(scores[position])
+        chunk = valid_chunks[position]
+        text = str(chunk.get("text", ""))
+        overlap = query_terms.intersection(meaningful_terms(text))
+
+        if score < MIN_SCORE:
+            continue
+
+        if len(overlap) < MIN_QUERY_TERMS:
+            continue
+
+        item = dict(chunk)
+        item["score"] = round(score, 4)
+        results.append(item)
+
+        if len(results) >= top_k:
+            break
+
+    return results
+
+
+def search(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
+    return retrieve(query, top_k, document_name)
