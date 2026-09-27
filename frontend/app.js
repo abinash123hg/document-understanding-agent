@@ -282,3 +282,41 @@ setTheme(state.theme);
 renderDocuments();
 renderHistory();
 
+
+// ====================== CLAUDE-STYLE THINKING WORDS ======================
+const thinkingWords = [
+  "Flibbertigibbeting...",
+  "Discombobulating...",
+  "Smooshing...",
+  "Wibbling...",
+  "Clauding...",
+  "Beboppin'...",
+  "Boondoggling...",
+  "Bloviating...",
+  "Cogitating...",
+  "Contemplating...",
+  "Ruminating...",
+  "Philosophizing...",
+  "Meandering...",
+  "Dilly-dallying...",
+  "Combobulating...",
+  "Cerebrating...",
+  "Churning...",
+  "Brewing...",
+  "Baking...",
+  "Cooking...",
+  "Crystallizing...",
+  "Deliberating...",
+  "Architecting...",
+  "Channeling...",
+  "Concocting...",
+  "Pondering...",
+  "Mulling...",
+  "Brain-storming..."
+];
+
+function getRandomThinkingWord() {
+  return thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
+}
+// ========================================================================
+
