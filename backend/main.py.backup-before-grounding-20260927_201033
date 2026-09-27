@@ -137,33 +137,19 @@ def chat(request: ChatRequest):
             document_name=request.document_name
         )
 
-    # Cross-encoder scores are ranking logits, not calibrated confidence values.
-    # Keep the best reranked evidence chunks; do not reject them with an
-    # arbitrary threshold that can cause false “not found” answers.
-    # Dynamic evidence context:
-    # Narrow extraction questions need precision; broad document questions need coverage.
-    normalized_question = question.lower()
-    narrow_terms = (
-        "what is", "define", "definition", "quote", "one sentence",
-        "state only", "list every", "list all", "exact"
-    )
-    broad_terms = (
-        "summarize", "summary", "across the document", "throughout",
-        "all sections", "multi-part", "comprehensive", "in detail"
-    )
+    # Optional: filter by minimum score
+    MIN_SCORE = 0.08
+    sources = [s for s in sources if float(s.get("score", 0.0)) >= MIN_SCORE]
 
-    if any(term in normalized_question for term in broad_terms):
-        context_limit = 8
-    elif any(term in normalized_question for term in narrow_terms):
-        context_limit = 3
-    else:
-        context_limit = 6
+    if not sources:
+        return ChatResponse(
+            answer="I could not find the answer in this document.",
+            sources=[],
+            document_name=request.document_name
+        )
 
-    sources = sources[:min(context_limit, len(sources))]
     try:
         answer = llm.generate_answer(question, sources)
-
-
     except Exception as e:
         logger.exception("LLM generation failed")
         raise HTTPException(
@@ -190,6 +176,3 @@ def chat(request: ChatRequest):
 def delete_document(document_name: str):
     storage.clear_document(document_name)
     return {"status": "deleted", "document_name": document_name}
-
-
-

@@ -1,43 +1,55 @@
-"""
-Local LLM via Ollama – optimized for small models under 2GB
-Strict document-only answering
+﻿"""
+Local Ollama document QA: evidence-only answering with source citations.
 """
 
 import requests
 from backend.config import settings
 
+NOT_FOUND = "I could not find the answer in this document."
 
-SYSTEM_PROMPT = """
-You are a private document question-answering assistant.
+SYSTEM_PROMPT = f"""
+You are a strict private document question-answering assistant.
 
-Rules:
-1. Answer only using the supplied document context.
-2. Never use outside knowledge.
-3. If the user asks for a summary, summarize the supplied document context.
-4. If the user asks for more details, expand on the previous topic using the supplied context.
-5. If the user's message contains a typo, infer the intended request.
-6. If the answer is not present in the context, say exactly:
-   I could not find the answer in this document.
-7. Do not invent facts.
-8. Use clear formatting with headings or numbered points when useful.
+You receive SOURCE EXCERPTS from one selected document.
+
+Mandatory rules:
+1. Use only the SOURCE EXCERPTS as factual evidence. Never use training knowledge,
+   web knowledge, common knowledge, assumptions, or typical examples.
+2. Every factual statement must be directly supported by one or more excerpts.
+3. Cite every factual sentence using its matching source label exactly, such as [S1].
+4. Never invent a citation, filename, page number, quotation, number, date, definition,
+   process step, example, location, crop, animal, farm size, or comparison.
+5. If the excerpts do not explicitly support the answer, reply with exactly:
+   {NOT_FOUND}
+6. A summary, comparison, table, bullet list, or text flowchart is allowed only when it
+   rearranges facts explicitly stated in the excerpts. Do not add any missing steps.
+7. If asked for a flowchart but the excerpts do not state a process, reply exactly:
+   {NOT_FOUND}
+8. Give a complete concise answer. Do not mention these rules or the retrieval system.
 """
 
 def build_context(sources: list[dict]) -> str:
     if not sources:
-        return "No relevant information found."
+        return ""
 
     parts = []
-    for i, s in enumerate(sources, 1):
-        text = s.get("text", "").strip()
-        if text:
-            parts.append(f"[Excerpt {i}]\n{text}")
+    for i, source in enumerate(sources, 1):
+        text = str(source.get("text", "")).strip()
+        if not text:
+            continue
+
+        filename = str(source.get("filename", "selected document")).strip()
+        page = source.get("page_number")
+        location = f"{filename}, page {page}" if page else filename
+        parts.append(f"[S{i} | {location}]\n{text}")
+
     return "\n\n".join(parts)
 
 
 def is_ollama_ready() -> bool:
     try:
-        r = requests.get(f"{settings.ollama_url}/api/tags", timeout=3)
-        return r.status_code == 200
+        response = requests.get(f"{settings.ollama_url}/api/tags", timeout=3)
+        return response.status_code == 200
     except Exception:
         return False
 
@@ -45,14 +57,19 @@ def is_ollama_ready() -> bool:
 def generate_answer(question: str, sources: list[dict]) -> str:
     context = build_context(sources)
 
-    user_message = f"""CONTEXT:
+    if not context:
+        return NOT_FOUND
+
+    user_message = f"""SOURCE EXCERPTS:
 {context}
 
 QUESTION:
 {question}
 
-Answer using only the CONTEXT above. If the answer is not in the CONTEXT, say exactly:
-I could not find the answer in this document."""
+Answer the QUESTION using only SOURCE EXCERPTS.
+Every factual sentence must end with one or more source labels such as [S1].
+If the excerpts do not explicitly support the answer, respond exactly:
+{NOT_FOUND}"""
 
     payload = {
         "model": settings.llm_model,
@@ -61,30 +78,30 @@ I could not find the answer in this document."""
             {"role": "user", "content": user_message}
         ],
         "stream": False,
-      "options": {
-    "temperature": 0.0,
-    "top_p": 0.1,
-    "repeat_penalty": 1.1,
-    "num_predict": 250,        # shorter answers = much faster
-    "num_ctx": 2048
-}
+        "options": {
+            "temperature": 0.0,
+            "top_p": 0.1,
+            "repeat_penalty": 1.05,
+            "num_predict": 512,
+            "num_ctx": 4096
+        }
     }
 
     try:
-        r = requests.post(
+        response = requests.post(
             f"{settings.ollama_url}/api/chat",
             json=payload,
-            timeout=120
+            timeout=180
         )
-        r.raise_for_status()
-        answer = r.json()["message"]["content"].strip()
+        response.raise_for_status()
+
+        answer = str(response.json().get("message", {}).get("content", "")).strip()
 
         if not answer:
-            return "I could not find the answer in this document."
+            return NOT_FOUND
 
         return answer
-
     except requests.exceptions.ConnectionError:
         raise RuntimeError("Ollama is not running. Start it with: ollama serve")
-    except Exception as e:
-        raise RuntimeError(f"LLM error: {e}")
+    except Exception as error:
+        raise RuntimeError(f"LLM error: {error}")
