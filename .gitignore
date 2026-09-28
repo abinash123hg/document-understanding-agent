@@ -21,3 +21,8 @@ data/chroma_db/
 data/chunks.json
 .packages_installed
 
+
+# Backup folders
+backup_*
+*.backup*
+
