@@ -11,3 +11,13 @@ logs/
 data/private/
 security_audit_report.md
 efficiency_report.json
+
+# Backup folders
+backup_*
+*.backup*
+
+# Local data
+data/chroma_db/
+data/chunks.json
+.packages_installed
+
