@@ -137,11 +137,7 @@ def chat(request: ChatRequest):
             document_name=request.document_name
         )
 
-    # Cross-encoder scores are ranking logits, not calibrated confidence values.
-    # Keep the best reranked evidence chunks; do not reject them with an
-    # arbitrary threshold that can cause false “not found” answers.
     # Dynamic evidence context:
-    # Narrow extraction questions need precision; broad document questions need coverage.
     normalized_question = question.lower()
     narrow_terms = (
         "what is", "define", "definition", "quote", "one sentence",
@@ -160,10 +156,9 @@ def chat(request: ChatRequest):
         context_limit = 6
 
     sources = sources[:min(context_limit, len(sources))]
+
     try:
         answer = llm.generate_answer(question, sources)
-
-
     except Exception as e:
         logger.exception("LLM generation failed")
         raise HTTPException(
@@ -171,13 +166,23 @@ def chat(request: ChatRequest):
             "The local language model is unavailable. Please try again."
         )
 
+    # Safe score conversion: handle None gracefully
+    def safe_score(s: dict) -> float:
+        sc = s.get("score")
+        if sc is None:
+            return 0.0
+        try:
+            return float(sc)
+        except (TypeError, ValueError):
+            return 0.0
+
     return ChatResponse(
         answer=answer,
         sources=[
             Source(
                 filename=s.get("filename", ""),
                 chunk_index=s.get("chunk_index", 0),
-                score=float(s.get("score", 0.0)),
+                score=safe_score(s),
                 text=s.get("text", "")[:300]
             )
             for s in sources
@@ -190,6 +195,3 @@ def chat(request: ChatRequest):
 def delete_document(document_name: str):
     storage.clear_document(document_name)
     return {"status": "deleted", "document_name": document_name}
-
-
-

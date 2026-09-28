@@ -1,61 +1,703 @@
-﻿<!doctype html>
-<html lang="en">
+﻿<!DOCTYPE html>
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Document Understanding Agent</title>
-  <link rel="stylesheet" href="style.css">
+  <title>AI Document Understanding Agent</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#121212",
+            sidebar: "#181818",
+            cardBg: "#1a1a1a",
+            borderCol: "#2a2a2a",
+            mutedText: "#9ba1a6",
+            inputBg: "#1b1b1b"
+          }
+        }
+      }
+    };
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    body {
+      font-family: "Inter", sans-serif;
+      background: #121212;
+      color: #e3e3e3;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.16);
+      border-radius: 999px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,255,255,.30);
+    }
+
+    .message-answer h1,
+    .message-answer h2,
+    .message-answer h3 {
+      color: #f5f5f5;
+      font-weight: 700;
+      margin: 1.1rem 0 .55rem;
+    }
+
+    .message-answer h1 { font-size: 1.30rem; }
+    .message-answer h2 { font-size: 1.14rem; }
+    .message-answer h3 { font-size: 1.02rem; }
+
+    .message-answer p {
+      margin: .6rem 0;
+      white-space: pre-wrap;
+    }
+
+    .message-answer ul,
+    .message-answer ol {
+      padding-left: 1.35rem;
+      margin: .7rem 0;
+    }
+
+    .message-answer ul { list-style: disc; }
+    .message-answer ol { list-style: decimal; }
+
+    .message-answer li {
+      margin: .32rem 0;
+    }
+
+    .message-answer code {
+      color: #d8b4fe;
+      background: #252525;
+      border: 1px solid #303030;
+      border-radius: .35rem;
+      padding: .12rem .32rem;
+      font-size: .82em;
+    }
+
+    .message-answer pre {
+      white-space: pre-wrap;
+      overflow-x: auto;
+      background: #171717;
+      border: 1px solid #303030;
+      border-radius: .75rem;
+      padding: .85rem;
+      margin: .8rem 0;
+      color: #e5e7eb;
+    }
+
+    .message-answer table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: .65rem;
+      border-style: hidden;
+      box-shadow: 0 0 0 1px #303030;
+      margin: .8rem 0;
+      font-size: .88rem;
+    }
+
+    .message-answer th,
+    .message-answer td {
+      padding: .65rem;
+      border: 1px solid #303030;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    .message-answer th {
+      background: #252525;
+      color: #f3f4f6;
+    }
+
+    .source-card summary {
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .source-card summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .source-card[open] .source-chevron {
+      transform: rotate(180deg);
+    }
+
+    .loading-dot {
+      animation: pulseDot 1.2s infinite ease-in-out;
+    }
+
+    .loading-dot:nth-child(2) { animation-delay: .15s; }
+    .loading-dot:nth-child(3) { animation-delay: .30s; }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: .25; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-2px); }
+    }
+  </style>
 </head>
-<body>
-  <div class="app-shell">
-    <header class="topbar">
-      <div>
-        <h1>Document Understanding Agent</h1>
-        <p>Private document chat · runs on your machine</p>
+
+<body class="bg-canvas text-gray-100 h-screen flex overflow-hidden selection:bg-indigo-500 selection:text-white">
+
+  <aside class="w-16 bg-sidebar border-r border-borderCol flex flex-col items-center py-4 justify-between shrink-0 select-none z-20">
+    <div class="flex flex-col items-center gap-6">
+      <button id="newThreadButton" title="New thread"
+        class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-[0_0_15px_rgba(99,102,241,.4)] hover:scale-105 transition-transform">
+        <i class="fa-solid fa-bolt text-sm"></i>
+      </button>
+
+      <div class="flex flex-col gap-3 text-mutedText">
+        <button id="newThreadIcon" title="New chat"
+          class="w-10 h-10 rounded-xl hover:bg-white/5 hover:text-white flex items-center justify-center transition">
+          <i class="fa-solid fa-plus text-sm"></i>
+        </button>
+
+        <button id="uploadIcon" title="Upload document"
+          class="w-10 h-10 rounded-xl hover:bg-white/5 hover:text-white flex items-center justify-center transition">
+          <i class="fa-solid fa-file-arrow-up text-sm"></i>
+        </button>
+
+        <button title="Document library"
+          class="w-10 h-10 rounded-xl bg-white/10 text-white flex items-center justify-center transition shadow-inner">
+          <i class="fa-solid fa-clone text-sm"></i>
+        </button>
+
+        <button id="clearChatIcon" title="Clear chat"
+          class="w-10 h-10 rounded-xl hover:bg-white/5 hover:text-white flex items-center justify-center transition">
+          <i class="fa-solid fa-clock-rotate-left text-sm"></i>
+        </button>
       </div>
-      <div class="top-actions">
-        <button id="themeBtn" class="theme-button" type="button">Dark</button>
-        <span id="status" class="status ready">Ready</span>
+    </div>
+
+    <div class="flex flex-col items-center">
+      <button title="Local private document agent"
+        class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-600 to-orange-700 text-white font-semibold flex items-center justify-center text-xs shadow-md hover:ring-2 hover:ring-amber-500/50 transition">
+        A
+      </button>
+    </div>
+  </aside>
+
+  <main class="flex-1 flex flex-col h-full relative overflow-hidden bg-canvas">
+
+    <header class="h-14 border-b border-borderCol px-4 sm:px-6 flex items-center justify-between bg-canvas/90 backdrop-blur-md z-10 shrink-0">
+      <div class="flex items-center gap-4 sm:gap-6 text-xs font-medium text-mutedText">
+        <button class="text-white flex items-center gap-2 border-b-2 border-white py-4">
+          <i class="fa-solid fa-align-left"></i> Answer
+        </button>
+        <button class="hidden sm:flex hover:text-white items-center gap-2 py-4 transition" title="Answers are based only on your selected document">
+          <i class="fa-solid fa-shield-halved"></i> Document-only
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2 sm:gap-3">
+        <div id="documentPill"
+          class="max-w-[175px] sm:max-w-[320px] bg-cardBg border border-borderCol px-3 py-1.5 rounded-full flex items-center gap-2 text-xs shadow-sm">
+          <i class="fa-solid fa-file-lines text-indigo-400"></i>
+          <span id="selectedDocumentName" class="truncate text-mutedText">No document selected</span>
+        </div>
+
+        <button id="uploadButton"
+          class="bg-cardBg hover:bg-[#252525] border border-borderCol text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-2 transition text-gray-200">
+          <i class="fa-solid fa-arrow-up-from-bracket"></i>
+          <span class="hidden sm:inline">Upload</span>
+        </button>
       </div>
     </header>
 
-    <main class="layout">
-      <aside class="sidebar">
-        <section class="panel">
-          <h2>Upload documents</h2>
-          <p class="muted">PDF, DOCX, TXT, MD and images</p>
-          <input id="fileInput" type="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg">
-          <button id="uploadBtn" class="primary" type="button">Upload selected file</button>
-          <div id="uploadStatus" class="message"></div>
-          <div id="documents" class="documents"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>History</h2>
-            <button id="clearHistoryBtn" class="small-button" type="button">Clear</button>
-          </div>
-          <p id="historyDocument" class="muted">Select a document.</p>
-          <div id="historyList" class="history-list"></div>
-        </section>
-      </aside>
-
-      <section class="chat-panel">
-        <div id="chat" class="chat">
-          <div class="empty-state">
-            <h2>Ask about your document</h2>
-            <p>Upload one document, then ask a clear question.</p>
-          </div>
+    <section id="chatFeed" class="flex-1 overflow-y-auto px-4 sm:px-6 py-8 max-w-4xl mx-auto w-full flex flex-col gap-7 pb-44">
+      <div id="welcomeCard" class="mt-8 sm:mt-16 text-center max-w-2xl mx-auto">
+        <div class="mx-auto mb-5 w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-[0_0_28px_rgba(99,102,241,.35)]">
+          <i class="fa-solid fa-bolt text-white text-xl"></i>
         </div>
 
-        <form id="chatForm" class="composer">
-          <textarea id="question" rows="3" disabled placeholder="Ask about the selected document..."></textarea>
-          <button id="askBtn" class="primary" type="submit" disabled>Ask</button>
-        </form>
-        <p class="hint">Press Enter to send · Shift+Enter for a new line</p>
-      </section>
-    </main>
-  </div>
-  <script src="app.js"></script>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-100">
+          Document Understanding Agent
+        </h1>
+
+        <p class="mt-3 text-sm sm:text-base text-mutedText leading-relaxed">
+          Upload a PDF, DOCX, image, or supported document. Select it, then ask questions.
+          Answers are generated locally from retrieved document evidence.
+        </p>
+
+        <div class="mt-7 flex flex-wrap justify-center gap-2">
+          <button class="example-question bg-cardBg border border-borderCol hover:bg-[#242424] text-xs text-gray-300 px-3 py-2 rounded-lg transition"
+            data-question="Summarize the selected document using only its content.">
+            Summarize document
+          </button>
+          <button class="example-question bg-cardBg border border-borderCol hover:bg-[#242424] text-xs text-gray-300 px-3 py-2 rounded-lg transition"
+            data-question="List the main topics explicitly mentioned in the selected document.">
+            List main topics
+          </button>
+          <button class="example-question bg-cardBg border border-borderCol hover:bg-[#242424] text-xs text-gray-300 px-3 py-2 rounded-lg transition"
+            data-question="What is the most important conclusion in the selected document?">
+            Find conclusion
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="absolute bottom-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-t from-canvas via-canvas/95 to-transparent flex justify-center z-30">
+      <div class="max-w-3xl w-full bg-inputBg border border-[#2c2c2c] rounded-2xl p-3 shadow-2xl flex flex-col gap-3">
+        <input id="fileInput" type="file" class="hidden" accept=".pdf,.docx,.doc,.pptx,.xlsx,.html,.htm,.txt,.png,.jpg,.jpeg,.webp">
+
+        <textarea id="questionInput" rows="2"
+          placeholder="Upload and select a document first..."
+          class="w-full bg-transparent text-gray-100 placeholder-[#757575] text-sm focus:outline-none resize-none px-1"
+          disabled></textarea>
+
+        <div class="flex items-center justify-between pt-2 border-t border-[#262626]">
+          <div class="flex items-center gap-2">
+            <button id="attachButton" title="Upload document"
+              class="w-8 h-8 rounded-lg hover:bg-[#2c2c2c] text-mutedText hover:text-white flex items-center justify-center transition">
+              <i class="fa-solid fa-plus text-xs"></i>
+            </button>
+
+            <label for="documentSelect"
+              class="bg-[#232323] hover:bg-[#2c2c2c] border border-borderCol text-xs px-3 py-1.5 rounded-lg text-gray-300 flex items-center gap-2 transition font-medium max-w-[205px]">
+              <i class="fa-solid fa-file-lines text-xs text-indigo-400"></i>
+              <select id="documentSelect" class="bg-transparent outline-none max-w-[150px] cursor-pointer text-gray-300">
+                <option value="">Select document</option>
+              </select>
+            </label>
+
+            <span id="statusText" class="hidden sm:inline text-[11px] text-mutedText"></span>
+          </div>
+
+          <div class="flex items-center gap-2 sm:gap-3">
+            <span class="hidden sm:flex text-[11px] text-mutedText items-center gap-1.5">
+              <i class="fa-solid fa-lock text-[10px]"></i> Local
+            </span>
+
+            <button id="sendButton" title="Send question"
+              class="w-8 h-8 rounded-full bg-gray-200 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 flex items-center justify-center transition shadow-md cursor-pointer hover:scale-105"
+              disabled>
+              <i class="fa-solid fa-arrow-up text-xs font-bold"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    const chatFeed = document.getElementById("chatFeed");
+    const welcomeCard = document.getElementById("welcomeCard");
+    const fileInput = document.getElementById("fileInput");
+    const documentSelect = document.getElementById("documentSelect");
+    const selectedDocumentName = document.getElementById("selectedDocumentName");
+    const questionInput = document.getElementById("questionInput");
+    const sendButton = document.getElementById("sendButton");
+    const statusText = document.getElementById("statusText");
+    const uploadButton = document.getElementById("uploadButton");
+    const attachButton = document.getElementById("attachButton");
+    const uploadIcon = document.getElementById("uploadIcon");
+    const newThreadButton = document.getElementById("newThreadButton");
+    const newThreadIcon = document.getElementById("newThreadIcon");
+    const clearChatIcon = document.getElementById("clearChatIcon");
+
+    let documents = [];
+
+    function setStatus(text, isError = false) {
+      statusText.textContent = text || "";
+      statusText.className = "hidden sm:inline text-[11px] " + (isError ? "text-red-400" : "text-mutedText");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function renderInline(text) {
+      return escapeHtml(text)
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong class='text-gray-100'>$1</strong>");
+    }
+
+    function renderMarkdown(text) {
+      const lines = String(text || "").replace(/\r/g, "").split("\n");
+      let html = "";
+      let listType = null;
+      let tableRows = [];
+
+      function closeList() {
+        if (listType) {
+          html += listType === "ol" ? "</ol>" : "</ul>";
+          listType = null;
+        }
+      }
+
+      function flushTable() {
+        if (!tableRows.length) return;
+        const validRows = tableRows.filter(row => row.length >= 2);
+        if (validRows.length >= 2) {
+          const rows = validRows.filter((row, index) => {
+            if (index !== 1) return true;
+            return !row.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+          });
+
+          html += "<table>";
+          rows.forEach((row, index) => {
+            const tag = index === 0 ? "th" : "td";
+            html += "<tr>" + row.map(cell => `<${tag}>${renderInline(cell.trim())}</${tag}>`).join("") + "</tr>";
+          });
+          html += "</table>";
+        } else {
+          html += "<p>" + renderInline(tableRows.map(row => row.join(" | ")).join(" ")) + "</p>";
+        }
+        tableRows = [];
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+          closeList();
+          tableRows.push(trimmed.slice(1, -1).split("|"));
+          continue;
+        }
+
+        flushTable();
+
+        if (!trimmed) {
+          closeList();
+          continue;
+        }
+
+        if (/^###\s+/.test(trimmed)) {
+          closeList();
+          html += `<h3>${renderInline(trimmed.replace(/^###\s+/, ""))}</h3>`;
+        } else if (/^##\s+/.test(trimmed)) {
+          closeList();
+          html += `<h2>${renderInline(trimmed.replace(/^##\s+/, ""))}</h2>`;
+        } else if (/^#\s+/.test(trimmed)) {
+          closeList();
+          html += `<h1>${renderInline(trimmed.replace(/^#\s+/, ""))}</h1>`;
+        } else if (/^[-*]\s+/.test(trimmed)) {
+          if (listType !== "ul") {
+            closeList();
+            html += "<ul>";
+            listType = "ul";
+          }
+          html += `<li>${renderInline(trimmed.replace(/^[-*]\s+/, ""))}</li>`;
+        } else if (/^\d+\.\s+/.test(trimmed)) {
+          if (listType !== "ol") {
+            closeList();
+            html += "<ol>";
+            listType = "ol";
+          }
+          html += `<li>${renderInline(trimmed.replace(/^\d+\.\s+/, ""))}</li>`;
+        } else {
+          closeList();
+          html += `<p>${renderInline(trimmed)}</p>`;
+        }
+      }
+
+      closeList();
+      flushTable();
+      return html || "<p>I could not find the answer in this document.</p>";
+    }
+
+    function scrollToBottom() {
+      requestAnimationFrame(() => {
+        chatFeed.scrollTop = chatFeed.scrollHeight;
+      });
+    }
+
+    function clearChat() {
+      chatFeed.innerHTML = "";
+      chatFeed.appendChild(welcomeCard);
+      welcomeCard.classList.remove("hidden");
+      questionInput.value = "";
+      scrollToBottom();
+    }
+
+    function addUserMessage(question) {
+      welcomeCard.classList.add("hidden");
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "flex justify-end";
+
+      wrapper.innerHTML = `
+        <div class="max-w-[86%] sm:max-w-[75%] bg-[#252525] border border-[#343434] rounded-2xl rounded-br-md px-4 py-3 text-sm leading-relaxed text-gray-100 shadow-sm whitespace-pre-wrap">
+          ${escapeHtml(question)}
+        </div>
+      `;
+
+      chatFeed.appendChild(wrapper);
+      scrollToBottom();
+    }
+
+    function addLoadingMessage() {
+      const wrapper = document.createElement("div");
+      wrapper.id = "loadingMessage";
+      wrapper.className = "flex gap-3 items-start";
+
+      wrapper.innerHTML = `
+        <div class="w-8 h-8 shrink-0 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-sm">
+          <i class="fa-solid fa-bolt text-white text-xs"></i>
+        </div>
+        <div class="bg-cardBg border border-borderCol rounded-2xl rounded-tl-md px-4 py-3 flex items-center gap-1.5">
+          <span class="loading-dot w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+          <span class="loading-dot w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+          <span class="loading-dot w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+        </div>
+      `;
+
+      chatFeed.appendChild(wrapper);
+      scrollToBottom();
+      return wrapper;
+    }
+
+    function sourceTitle(source) {
+      const page = source.page_number ? ` · Page ${source.page_number}` : "";
+      const chunk = Number.isInteger(source.chunk_index) ? ` · Chunk ${source.chunk_index + 1}` : "";
+      return `${source.filename || "Selected document"}${page}${chunk}`;
+    }
+
+    function addAssistantMessage(answer, sources = []) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "flex gap-3 items-start";
+
+      const sourceHtml = sources.length
+        ? `
+          <details class="source-card mt-4 bg-[#181818] border border-borderCol rounded-xl overflow-hidden">
+            <summary class="px-3.5 py-3 flex items-center justify-between gap-3 text-xs text-gray-300 hover:bg-white/[.025] transition">
+              <span class="flex items-center gap-2 min-w-0">
+                <i class="fa-solid fa-book-open text-indigo-400"></i>
+                <span>${sources.length} retrieved source${sources.length === 1 ? "" : "s"}</span>
+              </span>
+              <i class="source-chevron fa-solid fa-chevron-down text-[10px] text-mutedText transition-transform"></i>
+            </summary>
+            <div class="border-t border-borderCol p-2.5 space-y-2">
+              ${sources.map((source, index) => `
+                <div class="bg-cardBg border border-[#303030] rounded-lg p-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="text-[11px] text-indigo-300 font-medium truncate">S${index + 1} · ${escapeHtml(sourceTitle(source))}</div>
+                      <div class="text-[11px] text-mutedText mt-1 leading-relaxed whitespace-pre-wrap">${escapeHtml(source.text || "No preview available.")}</div>
+                    </div>
+                    <button class="copy-source shrink-0 w-7 h-7 rounded-md hover:bg-white/10 text-mutedText hover:text-white transition" title="Copy source excerpt">
+                      <i class="fa-regular fa-copy text-xs"></i>
+                    </button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </details>
+        `
+        : "";
+
+      wrapper.innerHTML = `
+        <div class="w-8 h-8 shrink-0 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-sm mt-0.5">
+          <i class="fa-solid fa-bolt text-white text-xs"></i>
+        </div>
+        <div class="min-w-0 flex-1">
+          <article class="message-answer text-sm leading-relaxed text-gray-200">
+            ${renderMarkdown(answer)}
+          </article>
+          ${sourceHtml}
+          <div class="mt-3 flex items-center gap-2">
+            <button class="copy-answer text-[11px] text-mutedText hover:text-white transition flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/5">
+              <i class="fa-regular fa-copy"></i> Copy
+            </button>
+          </div>
+        </div>
+      `;
+
+      wrapper.querySelector(".copy-answer").addEventListener("click", async () => {
+        await copyText(answer);
+      });
+
+      wrapper.querySelectorAll(".copy-source").forEach((button, index) => {
+        button.addEventListener("click", async () => {
+          await copyText(sources[index].text || "");
+        });
+      });
+
+      chatFeed.appendChild(wrapper);
+      scrollToBottom();
+    }
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Copied");
+        setTimeout(() => setStatus(""), 1400);
+      } catch {
+        setStatus("Copy failed", true);
+      }
+    }
+
+    function updateSelectedDocument() {
+      const selected = documentSelect.value;
+      selectedDocumentName.textContent = selected || "No document selected";
+      questionInput.disabled = !selected;
+      sendButton.disabled = !selected || !questionInput.value.trim();
+      questionInput.placeholder = selected
+        ? "Ask a question about the selected document..."
+        : "Upload and select a document first...";
+    }
+
+    function addDocument(name, selectIt = true) {
+      if (!name) return;
+
+      if (!documents.includes(name)) {
+        documents.push(name);
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        documentSelect.appendChild(option);
+      }
+
+      if (selectIt) {
+        documentSelect.value = name;
+      }
+
+      updateSelectedDocument();
+    }
+
+    async function uploadDocument(file) {
+      if (!file) return;
+
+      setStatus(`Uploading ${file.name}...`);
+      uploadButton.disabled = true;
+      attachButton.disabled = true;
+
+      const data = new FormData();
+      data.append("file", file);
+
+      try {
+        const response = await fetch(`${API_BASE}/documents/upload`, {
+          method: "POST",
+          body: data
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.error || "Upload failed");
+        }
+
+        const documentName = result.document_name || result.filename || file.name;
+        addDocument(documentName, true);
+        setStatus(`Indexed ${result.chunk_count ?? 0} chunks`);
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || "Upload failed", true);
+      } finally {
+        uploadButton.disabled = false;
+        attachButton.disabled = false;
+        fileInput.value = "";
+      }
+    }
+
+    async function askQuestion() {
+      const question = questionInput.value.trim();
+      const documentName = documentSelect.value;
+
+      if (!question || !documentName) return;
+
+      addUserMessage(question);
+      questionInput.value = "";
+      sendButton.disabled = true;
+
+      const loading = addLoadingMessage();
+      setStatus("Searching document...");
+
+      try {
+        const response = await fetch(`${API_BASE}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: question,
+            document_name: documentName
+          })
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.error || "Could not get an answer");
+        }
+
+        loading.remove();
+        addAssistantMessage(
+          result.answer || "I could not find the answer in this document.",
+          Array.isArray(result.sources) ? result.sources : []
+        );
+        setStatus("");
+      } catch (error) {
+        loading.remove();
+        addAssistantMessage(`**Error:** ${error.message || "Could not contact the local backend."}`, []);
+        setStatus("Backend error", true);
+      } finally {
+        updateSelectedDocument();
+      }
+    }
+
+    fileInput.addEventListener("change", () => uploadDocument(fileInput.files[0]));
+    uploadButton.addEventListener("click", () => fileInput.click());
+    attachButton.addEventListener("click", () => fileInput.click());
+    uploadIcon.addEventListener("click", () => fileInput.click());
+
+    documentSelect.addEventListener("change", updateSelectedDocument);
+
+    questionInput.addEventListener("input", () => {
+      sendButton.disabled = !documentSelect.value || !questionInput.value.trim();
+    });
+
+    questionInput.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        askQuestion();
+      }
+    });
+
+    sendButton.addEventListener("click", askQuestion);
+
+    document.querySelectorAll(".example-question").forEach(button => {
+      button.addEventListener("click", () => {
+        if (!documentSelect.value) {
+          setStatus("Upload/select a document first", true);
+          return;
+        }
+        questionInput.value = button.dataset.question || "";
+        questionInput.focus();
+        sendButton.disabled = false;
+      });
+    });
+
+    [newThreadButton, newThreadIcon, clearChatIcon].forEach(button => {
+      button.addEventListener("click", clearChat);
+    });
+
+    updateSelectedDocument();
+  </script>
 </body>
 </html>
