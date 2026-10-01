@@ -1,28 +1,23 @@
-﻿.venv/
+# Local environment
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Secrets: only the example file belongs in git
 .env
 .env.*
 !.env.example
+
+# Stored documents, embeddings and scratch space
+data/
 uploads/
 tmp/
 logs/
 *.log
-data/private/
-security_audit_report.md
-efficiency_report.json
 
-# Backup folders
-backup_*
-*.backup*
-
-# Local data
-data/chroma_db/
-data/chunks.json
-.packages_installed
-
-
-# Backup folders
-backup_*
-*.backup*
-
+# Editor and OS noise
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
