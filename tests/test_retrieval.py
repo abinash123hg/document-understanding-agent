@@ -103,6 +103,20 @@ def test_top_k_is_respected(indexed_pair):
     assert len(results) <= 1
 
 
+def test_configured_rerank_floor_controls_candidate_filtering(indexed_pair, monkeypatch):
+    class FixedReranker:
+        def predict(self, pairs):
+            return [-7.0] * len(pairs)
+
+    monkeypatch.setattr(retriever, "reranker", lambda: FixedReranker())
+    monkeypatch.setattr(settings, "min_rerank_score", -8.0)
+
+    assert retriever.retrieve("villages survey", document_name=DOC_A)
+
+    monkeypatch.setattr(settings, "min_rerank_score", -6.0)
+    assert retriever.retrieve("villages survey", document_name=DOC_A) == []
+
+
 def test_purge_removes_the_vectors_a_reupload_would_otherwise_reuse(indexed_pair):
     """Deleting only the JSON chunks would leave the old embeddings searchable,
     and stale text looks perfectly grounded because it really is in the file."""

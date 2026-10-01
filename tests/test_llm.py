@@ -41,6 +41,12 @@ def test_generate_answer_refuses_without_sources():
     assert llm.generate_answer("How much water?", []) == llm.NOT_FOUND
 
 
+def test_empty_sources_report_no_evidence_reason():
+    assert llm.generate_answer_result("How much water?", []) == (
+        llm.NOT_FOUND, "no_evidence"
+    )
+
+
 def test_build_context_labels_every_excerpt_with_page_and_type():
     context = llm.build_context([digital_chunk(), digital_chunk(page_number=7)])
 
@@ -85,6 +91,9 @@ def test_low_confidence_handwriting_is_not_answerable():
 
     assert not llm._evidence_is_legible(sources)
     assert llm.generate_answer("What is written?", sources) == llm.NOT_FOUND
+    assert llm.generate_answer_result("What is written?", sources) == (
+        llm.NOT_FOUND, "low_handwriting_confidence"
+    )
 
 
 def test_digital_evidence_needs_no_ocr_confidence():
@@ -145,6 +154,20 @@ def test_draft_is_rejected_when_the_verifier_fails(monkeypatch):
     assert len(calls) == 2, "the draft must be verified before it is returned"
 
 
+def test_verifier_refusal_reports_unsupported_claim(monkeypatch):
+    monkeypatch.setattr(
+        llm, "ollama_chat",
+        lambda messages, num_predict, timeout=180: (
+            "FAIL" if messages[0]["content"].startswith("Return only PASS")
+            else "The tank holds 500 litres. [S1]"
+        ),
+    )
+
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "unsupported_claim"
+    )
+
+
 def test_verified_draft_is_returned(monkeypatch):
     def fake_chat(messages, num_predict, timeout=180):
         return "PASS" if messages[0]["content"].startswith("Return only PASS") else "The tank holds 200 litres. [S1]"
@@ -152,6 +175,9 @@ def test_verified_draft_is_returned(monkeypatch):
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
     assert llm.generate_answer("Capacity?", [digital_chunk()]) == "The tank holds 200 litres. [S1]"
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        "The tank holds 200 litres. [S1]", None
+    )
 
 
 def test_exact_refusal_draft_short_circuits(monkeypatch):

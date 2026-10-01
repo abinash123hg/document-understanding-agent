@@ -40,11 +40,13 @@ embedded characters are rasterized and recognised, and those chunks are tagged
 - **Docling** was removed. It is a general document converter, and its layout
   machinery is dead weight once per-page handwriting recognition is the actual
   requirement. It was also the heaviest dependency in the project.
-- **TrOCR `microsoft/trocr-base-handwritten`** replaced it, because it is the
-  only option here trained specifically on handwritten English lines rather
-  than printed pages. OpenCV handles the geometry (deskew and line
-  segmentation) so TrOCR receives one clean line at a time, which is what it
-  expects.
+- **TrOCR `microsoft/trocr-base-handwritten`** remains the default. On the
+  repository's synthetic sample, its CER and WER matched the small model; this
+  larger model had no measurable disadvantage on that test. This does not
+  establish how either model performs on real handwriting. Set
+  `HTR_MODEL=microsoft/trocr-small-handwritten` as a CPU speed option; its real-
+  handwriting accuracy has not been measured here. OpenCV handles geometry
+  (deskew and line segmentation) so TrOCR receives one clean line at a time.
 
 Line boundaries are found on the binarized mask, but the crops themselves are
 taken from the grayscale image: thresholding throws away the stroke weight and
@@ -236,14 +238,12 @@ text kept in `handwritten_notes_ground_truth.txt` so error rates are measurable.
 The generator sizes the script from the measured text and rotates with
 `expand=True`, so no line can be cut off by the page edge.
 
-Measured on that page, `microsoft/trocr-base-handwritten`, greedy decoding:
+Measured on that synthetic page in this run, greedy decoding:
 
-| Metric | Value |
-|--------|-------|
-| Lines segmented | 5 of 5 |
-| Character error rate | 0.017 |
-| Word error rate | 0.204 |
-| Mean token confidence | 0.993 |
+| Model | Lines segmented | Character error rate | Word error rate | Mean token confidence |
+|-------|-----------------|----------------------|-----------------|-----------------------|
+| `microsoft/trocr-base-handwritten` | 5 of 5 | 0.017 | 0.204 | 0.993 |
+| `microsoft/trocr-small-handwritten` | 5 of 5 | 0.017 | 0.204 | 0.988 |
 
 ```bash
 python tools/evaluate_handwriting.py
@@ -258,10 +258,10 @@ emits sentence-final punctuation as its own token, so the ground truth's
 `district .` counts as two words against its one. CER, which sees the same
 characters either way, is 0.017.
 
-**Real human handwriting has not been measured.** This repository ships no
-person's writing, so there is no real-world accuracy figure to quote. To get one,
-put a page and its transcription in `sample_docs/real_handwritten/` and run the
-same measurement - see that folder's README:
+**Real human handwriting has not been measured.** These synthetic results do
+not predict accuracy on a person's writing. Before trusting any score, measure
+your own handwritten page and transcription with `tools/evaluate_handwriting.py`
+(see `sample_docs/real_handwritten/README.md`):
 
 ```bash
 python tools/evaluate_handwriting.py \
@@ -278,10 +278,7 @@ Same machine, CPU only:
 
 | Operation | Time |
 |-----------|------|
-| Extract text from a 20-page digital PDF | 0.12 s |
-| Full upload of that PDF (chunk + embed 120 chunks), steady state | ~1.2 s |
-| First upload in a fresh process (loads the embedding models) | ~6 s |
-| One handwritten PDF page through TrOCR | ~10-15 s |
+| Warm OCR of the 5-line synthetic image with base TrOCR | 8.810 s |
 
 A digital PDF never touches the recogniser, which is what keeps ordinary uploads
 fast. Scanned pages cost what CPU inference costs, and `PDF_MAX_OCR_PAGES`

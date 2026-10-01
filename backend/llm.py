@@ -237,17 +237,22 @@ FAIL"""
         return False
 
 
-def generate_answer(question: str, sources: list[dict]) -> str:
+def generate_answer_result(
+    question: str, sources: list[dict]
+) -> tuple[str, str | None]:
+    if not sources:
+        return NOT_FOUND, "no_evidence"
+
     if not _evidence_is_legible(sources):
         logger.warning(
             "Refusing to answer: handwriting confidence is below %.2f",
             settings.htr_min_confidence,
         )
-        return NOT_FOUND
+        return NOT_FOUND, "low_handwriting_confidence"
 
     context = build_context(sources)
     if not context:
-        return NOT_FOUND
+        return NOT_FOUND, "no_evidence"
 
     # build_context numbers the excerpts it actually emits, so the highest legal
     # label is the count of non-empty excerpts rather than the list length.
@@ -278,7 +283,7 @@ If nothing answers the question, respond exactly:
         raise RuntimeError(f"Ollama request failed: {error}") from error
 
     if not draft or draft.strip() == NOT_FOUND:
-        return NOT_FOUND
+        return NOT_FOUND, "no_evidence"
 
     if not citations_are_real(draft, excerpt_count):
         # A small local model sometimes states the right fact and still leaves
@@ -304,9 +309,14 @@ If nothing answers the question, respond exactly:
     if not citations_are_real(draft, excerpt_count):
         logger.info("Rejected draft: excerpt citations missing or outside the "
                     "supplied excerpts")
-        return NOT_FOUND
+        return NOT_FOUND, "unsupported_claim"
 
     if not verify_answer(question, context, draft):
-        return NOT_FOUND
+        return NOT_FOUND, "unsupported_claim"
 
-    return draft
+    return draft, None
+
+
+def generate_answer(question: str, sources: list[dict]) -> str:
+    """Backward-compatible text-only answer API."""
+    return generate_answer_result(question, sources)[0]

@@ -125,6 +125,93 @@ def test_image_only_pdf_page_is_routed_to_recognition(tmp_path, monkeypatch):
     assert seen["shape"][0] > 0, "the page should have been rasterized"
 
 
+def test_repeated_plain_text_footer_routes_scanned_pages_to_recognition(tmp_path, monkeypatch):
+    import pymupdf
+    from PIL import Image
+
+    image_path = tmp_path / "page.png"
+    Image.new("L", (600, 800), 255).save(image_path)
+
+    path = tmp_path / "repeated_footer_scan.pdf"
+    document = pymupdf.open()
+    for _ in range(2):
+        page = document.new_page(width=595, height=842)
+        page.insert_image(page.rect, filename=str(image_path))
+        page.insert_text((72, 90), "Sample University 2024", fontsize=12)
+    document.save(str(path))
+    document.close()
+
+    from backend import handwriting
+
+    seen = []
+    monkeypatch.setattr(
+        handwriting,
+        "recognize_array",
+        lambda gray: (seen.append(gray.shape) or "recognized content", 0.8),
+    )
+
+    pages = processor.extract_pdf_pages(path)
+
+    assert len(seen) == 2
+    assert all(page["content_type"] == "handwritten_ocr" for page in pages)
+    assert all(page["method"] == "trocr" for page in pages)
+
+
+def test_distinct_prose_text_layers_stay_digital(tmp_path, monkeypatch):
+    import pymupdf
+
+    path = tmp_path / "digital_prose.pdf"
+    document = pymupdf.open()
+    for number in range(1, 3):
+        page = document.new_page(width=595, height=842)
+        page.insert_text(
+            (72, 90),
+            f"Page {number} explains a distinct method using measured observations.",
+            fontsize=12,
+        )
+    document.save(str(path))
+    document.close()
+
+    from backend import handwriting
+
+    recognition_calls = []
+    monkeypatch.setattr(
+        handwriting,
+        "recognize_array",
+        lambda gray: recognition_calls.append(gray.shape),
+    )
+
+    pages = processor.extract_pdf_pages(path)
+
+    assert [page["page_number"] for page in pages] == [1, 2]
+    assert all(page["content_type"] == "digital_text" for page in pages)
+    assert all(page["method"] == "pymupdf" for page in pages)
+    assert "Page 1 explains" in pages[0]["text"]
+    assert "Page 2 explains" in pages[1]["text"]
+    assert recognition_calls == []
+
+
+def test_single_bare_url_text_layer_routes_to_recognition(tmp_path, monkeypatch):
+    import pymupdf
+
+    path = tmp_path / "url_only.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_text((72, 90), "https://example.com", fontsize=12)
+    document.save(str(path))
+    document.close()
+
+    from backend import handwriting
+
+    monkeypatch.setattr(handwriting, "recognize_array", lambda gray: ("recognized content", 0.8))
+
+    pages = processor.extract_pdf_pages(path)
+
+    assert pages[0]["content_type"] == "handwritten_ocr"
+    assert pages[0]["method"] == "trocr"
+    assert pages[0]["text"] == "recognized content"
+
+
 def test_ocr_page_budget_raises_instead_of_silently_truncating(tmp_path, monkeypatch):
     import pymupdf
 

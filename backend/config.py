@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     top_k: int = 4
     chunk_size: int = 400
     chunk_overlap: int = 60
+    min_rerank_score: float = -6.0
 
     # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"

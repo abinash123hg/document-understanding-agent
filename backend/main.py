@@ -10,7 +10,7 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -70,6 +70,9 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[Source] = Field(default_factory=list)
     document_name: Optional[str] = None
+    refusal_reason: Optional[
+        Literal["no_evidence", "low_handwriting_confidence", "unsupported_claim"]
+    ] = None
 
 
 @app.get("/")
@@ -195,15 +198,8 @@ def chat(request: ChatRequest):
         document_name=request.document_name,
     )
 
-    if not sources:
-        return ChatResponse(
-            answer=llm.NOT_FOUND,
-            sources=[],
-            document_name=request.document_name,
-        )
-
     try:
-        answer = llm.generate_answer(question, sources)
+        answer, refusal_reason = llm.generate_answer_result(question, sources)
     except Exception as error:
         logger.exception("LLM generation failed")
         raise HTTPException(
@@ -227,6 +223,7 @@ def chat(request: ChatRequest):
             for source in sources
         ],
         document_name=request.document_name,
+        refusal_reason=refusal_reason,
     )
 
 

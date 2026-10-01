@@ -34,12 +34,12 @@ set "PY=.venv\Scripts\python.exe"
 
 REM ---------- 2. Installed packages --------------------------------
 echo [CHECK]  Verifying installed packages ...
-%PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
+%PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
 if errorlevel 1 (
     echo [SETUP]  Missing packages found. Installing requirements ...
     echo          Needs internet. One time only.
     %PY% -m pip install -r requirements.txt
-    %PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
+    %PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
     if errorlevel 1 (
         echo.
         echo [ERROR] Installation did not finish correctly.

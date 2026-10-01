@@ -25,7 +25,6 @@ EMBED_MODEL = "all-MiniLM-L6-v2"
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 COLLECTION_NAME = "document_chunks"
 CANDIDATES = 12
-MIN_RERANK_SCORE = -6.0
 RRF_K = 60
 
 STOP_WORDS = {
@@ -226,11 +225,23 @@ def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> lis
     rerank_scores = reranker().predict([(query, row["text"]) for row in rows])
 
     ranked = []
+    dropped_scores = []
     for row, rerank_score in zip(rows, rerank_scores):
         row["rerank_score"] = float(rerank_score)
-        if row["rerank_score"] >= MIN_RERANK_SCORE:
+        if row["rerank_score"] >= settings.min_rerank_score:
             row["score"] = round(row["rerank_score"], 4)
             ranked.append(row)
+        else:
+            dropped_scores.append(row["rerank_score"])
+
+    if dropped_scores:
+        logger.debug(
+            "Rerank floor %.2f dropped %d/%d candidates; scores=%s",
+            settings.min_rerank_score,
+            len(dropped_scores),
+            len(rows),
+            dropped_scores,
+        )
 
     ranked.sort(key=lambda row: (row["rerank_score"], row["rrf_score"]), reverse=True)
     return ranked[:top_k]

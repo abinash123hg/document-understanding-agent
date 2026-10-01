@@ -101,6 +101,7 @@ def test_chat_without_a_selected_document_refuses(client):
 
     assert body["answer"] == llm.NOT_FOUND
     assert body["sources"] == []
+    assert body["refusal_reason"] == "no_evidence"
 
 
 def test_chat_for_an_unuploaded_document_refuses(client):
@@ -115,8 +116,8 @@ def test_chat_for_an_unuploaded_document_refuses(client):
 
 def test_chat_returns_citable_sources(client, uploaded, monkeypatch):
     monkeypatch.setattr(
-        llm, "generate_answer",
-        lambda question, sources: "Twelve villages were surveyed. [S1]",
+        llm, "generate_answer_result",
+        lambda question, sources: ("Twelve villages were surveyed. [S1]", None),
     )
 
     body = client.post(
@@ -124,6 +125,7 @@ def test_chat_returns_citable_sources(client, uploaded, monkeypatch):
     ).json()
 
     assert body["answer"] == "Twelve villages were surveyed. [S1]"
+    assert body["refusal_reason"] is None
     assert body["document_name"] == DOC
     source = body["sources"][0]
     assert set(source) >= {"filename", "chunk_index", "chunk_id", "page_number",
@@ -136,9 +138,9 @@ def test_the_retrieved_sources_are_scoped_to_one_document(client, uploaded, monk
 
     def spy(question, sources):
         captured["documents"] = {row["document_name"] for row in sources}
-        return "Twelve villages. [S1]"
+        return "Twelve villages. [S1]", None
 
-    monkeypatch.setattr(llm, "generate_answer", spy)
+    monkeypatch.setattr(llm, "generate_answer_result", spy)
 
     client.post("/chat", json={"question": "How many villages?", "document_name": DOC})
 
@@ -149,12 +151,34 @@ def test_llm_failure_becomes_a_service_error(client, uploaded, monkeypatch):
     def boom(question, sources):
         raise RuntimeError("Ollama is not reachable")
 
-    monkeypatch.setattr(llm, "generate_answer", boom)
+    monkeypatch.setattr(llm, "generate_answer_result", boom)
 
     response = client.post("/chat", json={"question": "Villages?", "document_name": DOC})
 
     assert response.status_code == 503
     assert "unavailable" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["no_evidence", "low_handwriting_confidence", "unsupported_claim"],
+)
+def test_chat_returns_exact_refusal_and_reason(client, uploaded, monkeypatch, reason):
+    monkeypatch.setattr(
+        llm,
+        "generate_answer_result",
+        lambda question, sources: (llm.NOT_FOUND, reason),
+    )
+
+    body = client.post(
+        "/chat", json={"question": "Anything?", "document_name": DOC}
+    ).json()
+
+    assert body["answer"] == (
+        "I could not find enough information in the uploaded documents "
+        "to answer this confidently."
+    )
+    assert body["refusal_reason"] == reason
 
 
 def test_empty_question_is_rejected(client, uploaded):

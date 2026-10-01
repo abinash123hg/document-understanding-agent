@@ -16,6 +16,7 @@ and content type, so citations can point at a real page.
 import logging
 import re
 import uuid
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 # A page needs at least this many embedded characters to be trusted as digital
 # text. Below it the page is treated as scanned and sent to recognition.
 EMBEDDED_TEXT_MIN_CHARS = 20
+URL_ONLY_TEXT = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
 
 DIGITAL = "digital_text"
 HANDWRITTEN = "handwritten_ocr"
@@ -152,10 +154,24 @@ def extract_pdf_pages(path: Path) -> list[dict]:
 
     document = _open_pdf(path)
     try:
-        for number, page in enumerate(document, start=1):
-            text = page.get_text("text").strip()
+        raw_texts = [page.get_text("text").strip() for page in document]
+        line_frequency = Counter()
+        for raw_text in raw_texts:
+            line_frequency.update({
+                line.strip() for line in raw_text.splitlines() if line.strip()
+            })
+        boilerplate = {
+            line for line, count in line_frequency.items()
+            if count >= 2 or URL_ONLY_TEXT.fullmatch(line.rstrip(".,;:)]}"))
+        }
 
-            if len(text) >= EMBEDDED_TEXT_MIN_CHARS:
+        for number, (page, text) in enumerate(zip(document, raw_texts), start=1):
+            usable_text = "\n".join(
+                line for line in text.splitlines()
+                if line.strip() and line.strip() not in boilerplate
+            )
+
+            if len(usable_text.strip()) >= EMBEDDED_TEXT_MIN_CHARS:
                 pages.append({
                     "page_number": number,
                     "text": text,
