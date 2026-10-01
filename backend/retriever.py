@@ -1,31 +1,39 @@
-﻿"""
-Hybrid grounded retriever: Chroma dense search + BM25 + MiniLM reranker.
-Selected-document-only, with evidence thresholds and chunk metadata.
+"""
+Hybrid grounded retriever: Chroma dense search + BM25, fused by reciprocal
+rank fusion, then reordered by a MiniLM cross-encoder.
+
+Retrieval is always scoped to one document. With no document selected the
+retriever returns nothing rather than searching everything, which is what makes
+cross-document leakage structurally impossible.
 """
 
-from pathlib import Path
-from functools import lru_cache
+import logging
 import re
+from functools import lru_cache
+from pathlib import Path
+
+from backend.config import settings
+from backend import storage
 
 import chromadb
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer, CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
-from backend import storage
-from backend.config import settings
+logger = logging.getLogger(__name__)
 
 EMBED_MODEL = "all-MiniLM-L6-v2"
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 COLLECTION_NAME = "document_chunks"
 CANDIDATES = 12
 MIN_RERANK_SCORE = -6.0
+RRF_K = 60
 
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "can", "could",
     "do", "does", "for", "from", "how", "i", "in", "is", "it", "me",
     "my", "of", "on", "or", "please", "tell", "that", "the", "this",
     "to", "was", "what", "when", "where", "which", "who", "why", "will",
-    "with", "would", "you", "your"
+    "with", "would", "you", "your",
 }
 
 
@@ -53,29 +61,31 @@ def collection():
     client = chromadb.PersistentClient(path=str(db_path))
     return client.get_or_create_collection(
         name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"}
+        metadata={"hnsw:space": "cosine"},
     )
 
 
-def index_document(document_name: str) -> list[dict]:
-    chunks = storage.get_chunks(document_name=document_name)
-    valid = []
+def index_document(document_name: str) -> int:
+    """
+    Embed one document's chunks into Chroma.
+
+    Called once at upload time, not per query. Returns the number of chunks
+    written.
+    """
     ids, texts, metas = [], [], []
 
-    for chunk in chunks:
+    for chunk in storage.get_chunks(document_name=document_name):
         text = str(chunk.get("text", "")).strip()
         chunk_id = str(chunk.get("id", "")).strip()
         if not text or not chunk_id:
             continue
 
-        valid.append(chunk)
         ids.append(chunk_id)
         texts.append(text)
         metas.append({
             "document_name": document_name,
             "filename": str(chunk.get("filename", document_name)),
-            "chunk_index": int(chunk.get("chunk_index", 0)),
-            "page_number": int(chunk.get("page_number") or 0)
+            "content_type": str(chunk.get("content_type", "digital_text")),
         })
 
     if ids:
@@ -86,72 +96,134 @@ def index_document(document_name: str) -> list[dict]:
             ids=ids, documents=texts, metadatas=metas, embeddings=vectors
         )
 
-    return valid
+    return len(ids)
 
 
-def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
+def purge_document(document_name: str) -> None:
+    """
+    Remove a document from the vector index.
+
+    Without this, deleting or re-uploading a file leaves its old vectors
+    searchable under the same document name, and the stale text looks perfectly
+    grounded to the verifier because it really is in the evidence.
+    """
     if not document_name:
+        return
+
+    try:
+        collection().delete(where={"document_name": document_name})
+    except Exception as error:
+        logger.warning("Could not purge %s from the vector index: %s", document_name, error)
+
+
+def _dense_ranking(query: str, document_name: str, limit: int) -> list[str]:
+    """Chunk ids ordered by cosine similarity, best first."""
+    if limit <= 0:
+        return []
+
+    vector = embedder().encode(
+        [query], normalize_embeddings=True, show_progress_bar=False
+    ).tolist()
+
+    result = collection().query(
+        query_embeddings=vector,
+        n_results=limit,
+        where={"document_name": document_name},
+        include=["metadatas", "distances"],
+    )
+
+    ids = (result.get("ids") or [[]])[0]
+    return [str(chunk_id) for chunk_id in ids]
+
+
+def _bm25_ranking(query: str, chunks: list[dict], limit: int) -> list[str]:
+    """Chunk ids ordered by lexical score, dropping zero-scoring chunks."""
+    query_tokens = tokens(query)
+    if not query_tokens:
+        return []
+
+    corpus = [tokens(str(chunk.get("text", ""))) for chunk in chunks]
+    scores = BM25Okapi(corpus).get_scores(query_tokens)
+
+    order = sorted(range(len(chunks)), key=lambda i: scores[i], reverse=True)
+    return [
+        str(chunks[i].get("id", ""))
+        for i in order[:limit]
+        if scores[i] > 0 and str(chunks[i].get("id", "")).strip()
+    ]
+
+
+def reciprocal_rank_fusion(rankings: list[list[str]]) -> list[tuple[str, float]]:
+    """
+    Merge ranked id lists into one ordering.
+
+    RRF scores a chunk by the sum of 1/(k + rank) across the lists it appears
+    in, so agreement between the dense and lexical stages is rewarded without
+    either stage's raw score scale dominating the other.
+    """
+    fused: dict[str, float] = {}
+
+    for ranking in rankings:
+        for rank, chunk_id in enumerate(ranking):
+            if chunk_id:
+                fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (RRF_K + rank + 1)
+
+    return sorted(fused.items(), key=lambda item: item[1], reverse=True)
+
+
+def _row(chunk: dict, document_name: str, rrf_score: float) -> dict:
+    page = chunk.get("page_number")
+
+    return {
+        "id": str(chunk.get("id", "")),
+        "text": str(chunk.get("text", "")).strip(),
+        "filename": str(chunk.get("filename", document_name)),
+        "document_name": document_name,
+        "chunk_index": int(chunk.get("chunk_index", 0)),
+        "chunk_id": str(chunk.get("chunk_id", "")),
+        "page_number": int(page) if page is not None else None,
+        "content_type": str(chunk.get("content_type", "digital_text")),
+        "extraction_method": str(chunk.get("extraction_method", "unknown")),
+        "ocr_confidence": chunk.get("ocr_confidence"),
+        "rrf_score": round(rrf_score, 6),
+    }
+
+
+def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> list[dict]:
+    """
+    Return the best evidence chunks for one document.
+
+    Nothing is indexed here; indexing happens once at upload. If the vector
+    index has no entry for the document, retrieval fails closed and returns an
+    empty list rather than falling back to a global search.
+    """
+    if not document_name or not str(query or "").strip():
         return []
 
     if top_k is None:
         top_k = settings.top_k
 
-    chunks = index_document(document_name)
+    chunks = storage.get_chunks(document_name=document_name)
     if not chunks:
         return []
 
-    query_vector = embedder().encode(
-        [query], normalize_embeddings=True, show_progress_bar=False
-    ).tolist()
+    by_id = {str(chunk.get("id", "")): chunk for chunk in chunks}
 
-    dense = collection().query(
-        query_embeddings=query_vector,
-        n_results=min(CANDIDATES, len(chunks)),
-        where={"document_name": document_name},
-        include=["documents", "metadatas", "distances"]
-    )
+    fused = reciprocal_rank_fusion([
+        _dense_ranking(query, document_name, min(CANDIDATES, len(chunks))),
+        _bm25_ranking(query, chunks, CANDIDATES),
+    ])
 
-    dense_docs = dense.get("documents", [[]])[0]
-    dense_meta = dense.get("metadatas", [[]])[0]
-    dense_distances = dense.get("distances", [[]])[0]
+    rows = []
+    for chunk_id, rrf_score in fused[:CANDIDATES]:
+        chunk = by_id.get(chunk_id)
+        if chunk and str(chunk.get("text", "")).strip():
+            rows.append(_row(chunk, document_name, rrf_score))
 
-    candidates = {}
-    for text, meta, distance in zip(dense_docs, dense_meta, dense_distances):
-        key = (int(meta.get("chunk_index", 0)), text)
-        candidates[key] = {
-            "text": text,
-            "filename": meta.get("filename", document_name),
-            "document_name": document_name,
-            "chunk_index": int(meta.get("chunk_index", 0)),
-            "page_number": int(meta.get("page_number", 0)) or None,
-            "dense_score": max(0.0, 1.0 - float(distance))
-        }
-
-    corpus_tokens = [tokens(str(chunk.get("text", ""))) for chunk in chunks]
-    bm25 = BM25Okapi(corpus_tokens)
-    bm25_scores = bm25.get_scores(tokens(query))
-
-    for index in sorted(range(len(chunks)), key=lambda i: bm25_scores[i], reverse=True)[:CANDIDATES]:
-        chunk = chunks[index]
-        text = str(chunk.get("text", "")).strip()
-        key = (int(chunk.get("chunk_index", 0)), text)
-        if key not in candidates:
-            candidates[key] = {
-                "text": text,
-                "filename": str(chunk.get("filename", document_name)),
-                "document_name": document_name,
-                "chunk_index": int(chunk.get("chunk_index", 0)),
-                "page_number": int(chunk.get("page_number") or 0) or None,
-                "dense_score": 0.0
-            }
-        candidates[key]["bm25_score"] = float(bm25_scores[index])
-
-    rows = list(candidates.values())
     if not rows:
         return []
 
-    pairs = [(query, row["text"]) for row in rows]
-    rerank_scores = reranker().predict(pairs)
+    rerank_scores = reranker().predict([(query, row["text"]) for row in rows])
 
     ranked = []
     for row, rerank_score in zip(rows, rerank_scores):
@@ -160,9 +232,5 @@ def retrieve(query: str, top_k: int = None, document_name: str = None) -> list[d
             row["score"] = round(row["rerank_score"], 4)
             ranked.append(row)
 
-    ranked.sort(key=lambda row: row["rerank_score"], reverse=True)
+    ranked.sort(key=lambda row: (row["rerank_score"], row["rrf_score"]), reverse=True)
     return ranked[:top_k]
-
-
-def search(query: str, top_k: int = None, document_name: str = None) -> list[dict]:
-    return retrieve(query, top_k, document_name)
