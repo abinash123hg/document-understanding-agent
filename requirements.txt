@@ -1,13 +1,32 @@
-﻿fastapi
-uvicorn[standard]
-python-multipart
-python-dotenv
-pydantic
-pydantic-settings
-requests
-numpy
-scikit-learn
-pypdf
-python-docx
-PyMuPDF
-openai
+# Web API
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+
+# Settings
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.4
+
+# Local LLM (Ollama HTTP API) - no cloud keys are used anywhere
+requests==2.34.2
+
+# Document extraction
+PyMuPDF==1.28.2
+python-docx==1.2.0
+
+# Handwriting recognition and image preprocessing
+torch==2.14.1
+transformers==5.18.0
+opencv-python-headless==5.0.0.93
+Pillow==12.3.0
+numpy==2.5.3
+
+# Retrieval: dense vectors + BM25 + cross-encoder reranking
+chromadb==1.5.9
+rank-bm25==0.2.2
+sentence-transformers==6.1.0
+
+# Tests
+pytest==9.1.1
+httpx==0.28.1

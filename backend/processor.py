@@ -1,11 +1,16 @@
 """
-Document processor.
+Document processor: extraction, normalization and chunking.
 
-Fast, document-agnostic extraction:
-- Searchable PDFs: PyMuPDF per-page text extraction.
-- Scanned or image-only PDFs: Docling fallback.
-- DOCX and image files: Docling.
-- Chunks retain page numbers and prefer natural text boundaries.
+Routing rules
+- .txt / .md      -> read directly                       (digital_text)
+- .docx           -> python-docx                         (digital_text)
+- .pdf            -> embedded text per page when present (digital_text);
+                     only pages with no usable text are rasterized and
+                     recognised, which keeps normal PDFs near-instant
+- .png/.jpg/.jpeg -> preprocessing + TrOCR               (handwritten_ocr)
+
+Every chunk keeps its document name, page number, chunk id, extraction method
+and content type, so citations can point at a real page.
 """
 
 import logging
@@ -13,20 +18,43 @@ import re
 import uuid
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 from backend.config import settings
 from backend.storage import add_chunks, clear_document
 
 logger = logging.getLogger(__name__)
 
+# A page needs at least this many embedded characters to be trusted as digital
+# text. Below it the page is treated as scanned and sent to recognition.
+EMBEDDED_TEXT_MIN_CHARS = 20
+
+DIGITAL = "digital_text"
+HANDWRITTEN = "handwritten_ocr"
+
 
 def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+    """
+    Tidy whitespace without touching content.
+
+    Line breaks are preserved on purpose: OCR output is line-structured, and
+    collapsing it into one run hides line boundaries from the chunker. Numbers,
+    formulas, names and units are never rewritten.
+    """
+    text = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def chunk_page_text(text: str) -> list[str]:
     """
-    Create chunks that favor paragraph and sentence endings. This prevents
-    avoidable mid-sentence splits while respecting configured size/overlap.
+    Split text into chunks that prefer paragraph and sentence boundaries.
+
+    Loop safety is explicit: every iteration either consumes characters or
+    forces the start forward, so overlapping windows can never spin.
     """
     text = normalize_text(text)
     if not text:
@@ -34,7 +62,7 @@ def chunk_page_text(text: str) -> list[str]:
 
     size = max(400, int(settings.chunk_size))
     overlap = max(0, min(int(settings.chunk_overlap), size // 2))
-    chunks = []
+    chunks: list[str] = []
     start = 0
     total = len(text)
 
@@ -43,14 +71,15 @@ def chunk_page_text(text: str) -> list[str]:
 
         if end < total:
             window = text[start:end]
-            choices = [
+            boundary = max(
+                window.rfind("\n\n"),
                 window.rfind(". "),
                 window.rfind("? "),
                 window.rfind("! "),
                 window.rfind("; "),
                 window.rfind(": "),
-            ]
-            boundary = max(choices)
+                window.rfind("\n"),
+            )
             if boundary >= max(120, int(size * 0.45)):
                 end = start + boundary + 1
 
@@ -69,129 +98,233 @@ def chunk_page_text(text: str) -> list[str]:
     return chunks
 
 
-def extract_pdf_pages_fast(path: Path) -> list[tuple[int, str]]:
-    """Extract embedded PDF text per page without OCR."""
-    try:
-        import fitz
+def _pixmap_to_gray(pixmap) -> np.ndarray:
+    samples = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+        pixmap.height, pixmap.width, pixmap.n
+    )
+    if pixmap.n == 1:
+        return samples[:, :, 0].copy()
+    if pixmap.n == 3:
+        return cv2.cvtColor(samples, cv2.COLOR_RGB2GRAY)
+    return cv2.cvtColor(samples, cv2.COLOR_RGBA2GRAY)
 
-        document = fitz.open(str(path))
-        try:
-            pages = []
-            for number, page in enumerate(document, start=1):
-                text = page.get_text("text").strip()
-                if text:
-                    pages.append((number, text))
-            return pages
-        finally:
-            document.close()
+
+def _downscale(gray: np.ndarray) -> np.ndarray:
+    limit = int(settings.pdf_max_dimension)
+    height, width = gray.shape[:2]
+    longest = max(height, width)
+
+    if longest <= limit:
+        return gray
+
+    scale = limit / longest
+    return cv2.resize(
+        gray,
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def _open_pdf(path: Path):
+    """Turn a broken file into a plain rejection instead of a stack trace."""
+    import pymupdf
+
+    try:
+        return pymupdf.open(str(path))
     except Exception as error:
-        logger.warning("Fast PDF extraction failed for %s: %s", path.name, error)
-        return []
+        raise ValueError(f"Could not open this PDF: {error}") from error
 
 
-def extract_with_docling(path: Path) -> tuple[str, str]:
-    """Fallback for scanned PDFs and normal conversion for DOCX/images."""
-    from docling.document_converter import DocumentConverter
+def extract_pdf_pages(path: Path) -> list[dict]:
+    """
+    Per-page extraction with real page numbers.
 
-    converter = DocumentConverter()
-    result = converter.convert(str(path))
-    document = result.document
+    Embedded text is read first because it is effectively free. A page only
+    pays the rasterize-and-recognise cost when it has no usable text layer,
+    which is what keeps ordinary PDF uploads fast.
+    """
+    import pymupdf
 
+    from backend import handwriting
+
+    pages: list[dict] = []
+    ocr_pages = 0
+
+    document = _open_pdf(path)
     try:
-        text = document.export_to_markdown()
-    except Exception:
-        text = document.export_to_text()
+        for number, page in enumerate(document, start=1):
+            text = page.get_text("text").strip()
 
-    return (text or "").strip(), "docling"
+            if len(text) >= EMBEDDED_TEXT_MIN_CHARS:
+                pages.append({
+                    "page_number": number,
+                    "text": text,
+                    "content_type": DIGITAL,
+                    "method": "pymupdf",
+                })
+                continue
+
+            if ocr_pages >= settings.pdf_max_ocr_pages:
+                raise ValueError(
+                    f"This PDF has more than {settings.pdf_max_ocr_pages} "
+                    f"scanned pages. Split it into smaller files, or raise "
+                    f"PDF_MAX_OCR_PAGES in your .env."
+                )
+
+            ocr_pages += 1
+            pixmap = page.get_pixmap(dpi=settings.pdf_dpi, alpha=False)
+            ocr_text, confidence = handwriting.recognize_array(
+                _downscale(_pixmap_to_gray(pixmap))
+            )
+            logger.info(
+                "Recognised page %d of %s (confidence %.3f)",
+                number, path.name, confidence,
+            )
+
+            pages.append({
+                "page_number": number,
+                "text": ocr_text,
+                "content_type": HANDWRITTEN,
+                "method": "trocr",
+                "ocr_confidence": round(confidence, 4),
+            })
+    finally:
+        document.close()
+
+    return pages
 
 
-def extract_text(path: Path) -> tuple[str, str]:
-    ext = path.suffix.lower()
+def extract_docx(path: Path) -> str:
+    import docx
 
-    if ext in {".txt", ".md"}:
-        return path.read_text(encoding="utf-8", errors="ignore"), "digital"
+    document = docx.Document(str(path))
+    parts = [paragraph.text for paragraph in document.paragraphs]
 
-    if ext == ".pdf":
-        pages = extract_pdf_pages_fast(path)
-        text = "\n".join(page_text for _, page_text in pages).strip()
+    for table in document.tables:
+        for row in table.rows:
+            parts.append(" ".join(cell.text for cell in row.cells))
 
-        if len(text) >= 100:
-            return text, "pymupdf-fast"
+    return "\n".join(part for part in parts if part.strip())
 
-        return extract_with_docling(path)
 
-    if ext in {".docx", ".png", ".jpg", ".jpeg"}:
-        return extract_with_docling(path)
+def _chunk_records(
+    text: str,
+    document_name: str,
+    page_number,
+    content_type: str,
+    method: str,
+    start_index: int,
+    ocr_confidence=None,
+) -> list[dict]:
+    records = []
 
-    raise ValueError(f"Unsupported file type: {ext}")
+    for index, chunk in enumerate(chunk_page_text(text)):
+        position = start_index + index
+        record = {
+            "id": str(uuid.uuid4()),
+            "filename": document_name,
+            "document_name": document_name,
+            "chunk_index": position,
+            "chunk_id": f"{page_number or 0}-{position}",
+            "page_number": page_number,
+            "content_type": content_type,
+            "extraction_method": method,
+            "text": chunk,
+        }
+        if ocr_confidence is not None:
+            record["ocr_confidence"] = ocr_confidence
+        records.append(record)
+
+    return records
+
+
+def _summarize_content_type(content_types: set) -> str:
+    if content_types == {HANDWRITTEN}:
+        return HANDWRITTEN
+    if content_types == {DIGITAL}:
+        return DIGITAL
+    return "mixed"
 
 
 def process_upload(path: Path, original_name: str) -> dict:
     ext = path.suffix.lower()
-    data = []
-    method = "unknown"
+    records: list[dict] = []
+    methods: set[str] = set()
+    content_types: set[str] = set()
+    page_count = 0
+    ocr_pages = 0
 
     if ext == ".pdf":
-        pages = extract_pdf_pages_fast(path)
-        page_text_total = sum(len(text.strip()) for _, text in pages)
+        pages = extract_pdf_pages(path)
+        page_count = len(pages)
 
-        if page_text_total >= 100:
-            method = "pymupdf-fast"
+        for page in pages:
+            methods.add(page["method"])
+            content_types.add(page["content_type"])
+            if page["content_type"] == HANDWRITTEN:
+                ocr_pages += 1
 
-            for page_number, page_text in pages:
-                for index, chunk in enumerate(chunk_page_text(page_text)):
-                    data.append({
-                        "id": str(uuid.uuid4()),
-                        "filename": original_name,
-                        "document_name": original_name,
-                        "chunk_index": len(data),
-                        "chunk_id": f"{page_number}-{index}",
-                        "page_number": page_number,
-                        "text": chunk,
-                    })
-        else:
-            text, method = extract_with_docling(path)
-            for index, chunk in enumerate(chunk_page_text(text)):
-                data.append({
-                    "id": str(uuid.uuid4()),
-                    "filename": original_name,
-                    "document_name": original_name,
-                    "chunk_index": index,
-                    "chunk_id": index,
-                    "page_number": None,
-                    "text": chunk,
-                })
+            records.extend(_chunk_records(
+                page["text"], original_name, page["page_number"],
+                page["content_type"], page["method"], len(records),
+                page.get("ocr_confidence"),
+            ))
+
+    elif ext == ".docx":
+        methods.add("python-docx")
+        content_types.add(DIGITAL)
+        records.extend(_chunk_records(
+            extract_docx(path), original_name, None, DIGITAL, "python-docx", 0
+        ))
+
+    elif ext in {".txt", ".md"}:
+        methods.add("plaintext")
+        content_types.add(DIGITAL)
+        records.extend(_chunk_records(
+            path.read_text(encoding="utf-8", errors="ignore"),
+            original_name, None, DIGITAL, "plaintext", 0,
+        ))
+
+    elif ext in {".png", ".jpg", ".jpeg"}:
+        from backend import handwriting
+
+        text, confidence = handwriting.recognize_image(path)
+        methods.add("trocr")
+        content_types.add(HANDWRITTEN)
+        page_count = 1
+        ocr_pages = 1
+        records.extend(_chunk_records(
+            text, original_name, 1, HANDWRITTEN, "trocr", 0, round(confidence, 4)
+        ))
+
     else:
-        text, method = extract_text(path)
-        for index, chunk in enumerate(chunk_page_text(text)):
-            data.append({
-                "id": str(uuid.uuid4()),
-                "filename": original_name,
-                "document_name": original_name,
-                "chunk_index": index,
-                "chunk_id": index,
-                "page_number": None,
-                "text": chunk,
-            })
+        raise ValueError(f"Unsupported file type: {ext}")
 
-    if not data:
+    if not records:
         return {
             "status": "FAILED",
             "error": "No readable text found in this document.",
         }
 
+    # Drop the previous version everywhere, including the vector index, so a
+    # re-upload can never leave stale chunks retrievable under the same name.
+    from backend import retriever
+
     clear_document(original_name)
-    add_chunks(data)
+    retriever.purge_document(original_name)
+    add_chunks(records)
+    retriever.index_document(original_name)
 
     logger.info(
-        "Indexed %s chunks from %s using %s",
-        len(data),
-        original_name,
-        method,
+        "Indexed %d chunks from %s (%s, %d page(s), %d OCR'd)",
+        len(records), original_name, "+".join(sorted(methods)), page_count, ocr_pages,
     )
 
     return {
         "status": "INDEXED",
-        "extraction_method": method,
-        "chunk_count": len(data),
+        "extraction_method": "+".join(sorted(methods)),
+        "content_type": _summarize_content_type(content_types),
+        "chunk_count": len(records),
+        "page_count": page_count,
+        "ocr_page_count": ocr_pages,
     }
