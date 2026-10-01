@@ -48,12 +48,11 @@ embedded characters are rasterized and recognised, and those chunks are tagged
   handwriting accuracy has not been measured here. OpenCV handles geometry
   (deskew and line segmentation) so TrOCR receives one clean line at a time.
 
+grey levels the recogniser relies on. Each line is then trimmed horizontally to
 Line boundaries are found on the binarized mask, but the crops themselves are
 taken from the grayscale image: thresholding throws away the stroke weight and
 grey levels the recogniser relies on. Each line is then trimmed horizontally to
-its own ink. Leaving a wide empty strip on the right of the crop invites TrOCR to
-"finish" the line: on the sample it invented a tail reading `of 1.0002000200020002`
-for a sentence that ends in `survey`.
+its own ink, avoiding unnecessary blank space around the text.
 
 ---
 
@@ -62,7 +61,6 @@ for a sentence that ends in `survey`.
 - Python 3.12
 - [Ollama](https://ollama.com) running locally, with the answer model pulled
 - Internet access **once**, on the first run, for the Hugging Face models
-- About 4 GB free RAM while the recogniser and the embedding models are loaded
 
 ```bash
 ollama pull qwen2.5:1.5b
@@ -127,24 +125,10 @@ Accepted extensions: `.pdf .txt .md .docx .png .jpg .jpeg`. Maximum upload size
 is 50 MB, enforced while streaming to disk, so an oversized file is rejected
 before it has been fully read.
 
-A `/chat` response always includes the evidence it used:
-
-```json
-{
-  "answer": "Twelve villages were surveyed. [S1]",
-  "document_name": "notes.pdf",
-  "sources": [{
-    "filename": "notes.pdf",
-    "page_number": 3,
-    "chunk_id": "3-1",
-    "chunk_index": 7,
-    "content_type": "handwritten_ocr",
-    "extraction_method": "trocr",
-    "score": 4.11,
-    "text": "The survey covered twelve villages ..."
-  }]
-}
-```
+A `/chat` response contains `answer`, `document_name`, and its retrieved
+`sources`. A refusal also includes `refusal_reason`, identifying whether there
+was no evidence, no answer in the excerpts, unreadable handwriting, or an
+unsupported claim.
 
 ---
 
@@ -183,9 +167,10 @@ Seven independent measures, each covered by a test:
 5. **Independent verifier.** A second pass checks that each claim is stated in
    the excerpts *and* that the draft answers the question asked. It fails
    closed: any error in the verifier means no answer.
-6. **OCR confidence gate.** If the only evidence is handwriting the recogniser
-   scored below `HTR_MIN_CONFIDENCE`, the system refuses rather than answer
-   from garbled text.
+6. **OCR confidence gate.** At least one citeable excerpt must be digital text
+  or handwriting at or above `HTR_MIN_CONFIDENCE`. If every citeable excerpt
+  is low-confidence handwriting, the system refuses; one unreadable excerpt
+  does not veto a separate readable excerpt.
 7. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
    commands.
 
@@ -199,9 +184,9 @@ When the evidence is insufficient the answer is exactly:
 ## Tests
 
 ```bash
-pytest                                    # 81 passed, 1 skipped, about 42 seconds
-pytest -m slow                            # +1 test: a real TrOCR pass, about 50s
-pytest tests/test_retrieval.py -k leak    # the document-isolation guarantee
+pytest
+pytest -m slow
+pytest tests/test_retrieval.py -k leak
 ```
 
 Five modules: `test_handwriting.py`, `test_processor.py`, `test_retrieval.py`,
@@ -209,12 +194,12 @@ Five modules: `test_handwriting.py`, `test_processor.py`, `test_retrieval.py`,
 `test_recognition_on_a_real_handwritten_sample`, which stays skipped until a real
 page is added (see below).
 
-Measured in this repository, Python 3.12.7, CPU only:
+Measured in this run:
 
 ```
-80 passed, 2 deselected        (pytest -m "not slow")
-1 passed, 1 skipped            (pytest -m slow)
-81 passed, 1 skipped           (pytest)
+96 passed, 1 skipped           (pytest -q)
+1 passed, 1 skipped, 95 deselected (pytest -m slow -q)
+1 passed, 12 deselected       (pytest tests/test_retrieval.py -k leak -q)
 ```
 
 `tools/live_check.py` runs the same guarantees against a **real** running
@@ -233,17 +218,16 @@ python tools/live_check.py --base http://127.0.0.1:8001 --oversize-file big.pdf
 ### Recognition accuracy
 
 `sample_docs/handwritten_notes.png` is **synthetic** handwriting: five lines
-rendered with the cursive *Ink Free* font, tilted 2.5 degrees, with the exact
+rendered with the cursive *Ink Free* font, with the exact
 text kept in `handwritten_notes_ground_truth.txt` so error rates are measurable.
 The generator sizes the script from the measured text and rotates with
 `expand=True`, so no line can be cut off by the page edge.
 
-Measured on that synthetic page in this run, greedy decoding:
+Measured on that synthetic page in this run with base TrOCR, greedy decoding:
 
-| Model | Lines segmented | Character error rate | Word error rate | Mean token confidence |
-|-------|-----------------|----------------------|-----------------|-----------------------|
-| `microsoft/trocr-base-handwritten` | 5 of 5 | 0.017 | 0.204 | 0.993 |
-| `microsoft/trocr-small-handwritten` | 5 of 5 | 0.017 | 0.204 | 0.988 |
+| Lines segmented | Character error rate | Word error rate | Mean token confidence |
+|-----------------|----------------------|-----------------|-----------------------|
+| 5 of 5 | 0.017 | 0.204 | 0.993 |
 
 ```bash
 python tools/evaluate_handwriting.py
@@ -253,10 +237,9 @@ CER and WER are computed over text lowercased and with whitespace collapsed, and
 spaces are deliberately kept in the character stream so CER cannot report a
 flattering zero.
 
-The word error rate is higher than it looks: not one word was misread. TrOCR
-emits sentence-final punctuation as its own token, so the ground truth's
-`district .` counts as two words against its one. CER, which sees the same
-characters either way, is 0.017.
+The word error rate is affected by sentence-final punctuation being emitted as
+its own token; the synthetic ground truth and recognised output can therefore
+tokenize punctuation differently.
 
 **Real human handwriting has not been measured.** These synthetic results do
 not predict accuracy on a person's writing. Before trusting any score, measure
@@ -278,7 +261,15 @@ Same machine, CPU only:
 
 | Operation | Time |
 |-----------|------|
-| Warm OCR of the 5-line synthetic image with base TrOCR | 8.810 s |
+| Extract generated 20-page digital PDF | 0.187 s |
+| Warm full upload of generated PDF (160 chunks; chunk + embed) | 0.954 s |
+| Full upload in a fresh process (model load + indexing) | 7.562 s |
+| Warm OCR of the 5-line synthetic image with base TrOCR | 8.766 s |
+
+The digital timing fixture is generated and contains no OCR pages. The cold
+measurement includes backend imports and loading the cached embedding model;
+the subprocess wall time was 12.952 s. All handwriting accuracy values above
+are synthetic; accuracy on real handwriting remains unmeasured.
 
 A digital PDF never touches the recogniser, which is what keeps ordinary uploads
 fast. Scanned pages cost what CPU inference costs, and `PDF_MAX_OCR_PAGES`
@@ -327,15 +318,7 @@ sample_docs/                     digital and handwritten fixtures
   GPU would change the timings, not the design.
 - Every accuracy figure above is **synthetic**. No real human handwriting has
   been measured, so no real-world accuracy is claimed.
-- The answer contract is one sentence ending in its `[S<n]>` label. A larger
-  model than `qwen2.5:1.5b` follows that format more reliably: with the 1.5B
-  model, measured on the sample document, 6 of 7 answerable questions came back
-  cited and correct, while one was refused because the model kept writing an
-  `[S4]` label that does not exist. Refusing it was the guard working - an
-  uncited answer cannot be traced - and a bigger pulled model is the fix, not a
-  looser guard.
-- The verifier is the same local model as the generator. It catches restating
-  errors well; on the 1.5B model it occasionally accepts an answer that restates
-  a related fact instead of the one asked. It is not a proof of correctness.
+- The answer verifier is the same local model as the generator. It is a
+  fail-closed check, not a proof of correctness.
 - DOCX tables are flattened during extraction, so cell alignment can be lost
   even when every value survives.

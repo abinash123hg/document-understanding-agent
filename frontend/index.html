@@ -495,7 +495,8 @@
       const refusalDescriptions = {
         no_evidence: "No relevant evidence was found in the selected document.",
         low_handwriting_confidence: "The handwriting was not clear enough to answer safely.",
-        unsupported_claim: "The answer could not be verified against the document."
+        unsupported_claim: "The answer could not be verified against the document.",
+        not_answerable: "The document does not appear to contain an answer to this question."
       };
       const refusalDescription = refusalDescriptions[refusalReason];
       const refusalHtml = refusalDescription

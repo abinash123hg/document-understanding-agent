@@ -71,7 +71,12 @@ class ChatResponse(BaseModel):
     sources: List[Source] = Field(default_factory=list)
     document_name: Optional[str] = None
     refusal_reason: Optional[
-        Literal["no_evidence", "low_handwriting_confidence", "unsupported_claim"]
+        Literal[
+            "no_evidence",
+            "low_handwriting_confidence",
+            "unsupported_claim",
+            "not_answerable",
+        ]
     ] = None
 
 

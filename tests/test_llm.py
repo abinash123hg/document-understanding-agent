@@ -37,12 +37,24 @@ def test_refusal_message_is_exact():
     )
 
 
-def test_generate_answer_refuses_without_sources():
-    assert llm.generate_answer("How much water?", []) == llm.NOT_FOUND
+def test_generate_answer_result_refuses_without_sources():
+    assert llm.generate_answer_result("How much water?", []) == (
+        llm.NOT_FOUND, "no_evidence"
+    )
 
 
 def test_empty_sources_report_no_evidence_reason():
     assert llm.generate_answer_result("How much water?", []) == (
+        llm.NOT_FOUND, "no_evidence"
+    )
+
+
+def test_blank_excerpt_reports_no_evidence_before_confidence_gate():
+    blank_handwriting = digital_chunk(
+        "  ", content_type="handwritten_ocr", ocr_confidence=0.01
+    )
+
+    assert llm.generate_answer_result("How much water?", [blank_handwriting]) == (
         llm.NOT_FOUND, "no_evidence"
     )
 
@@ -80,7 +92,9 @@ def test_fabricated_label_is_refused_without_reaching_the_verifier(monkeypatch):
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
     # one excerpt was supplied, so [S7] resolves to nothing
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "unsupported_claim"
+    )
     assert len(calls) == 2, "the label gets one correction attempt"
     assert not any(system.startswith("Return only PASS") for system in calls), \
         "an invented citation must never be sent for verification"
@@ -90,10 +104,39 @@ def test_low_confidence_handwriting_is_not_answerable():
     sources = [digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.11)]
 
     assert not llm._evidence_is_legible(sources)
-    assert llm.generate_answer("What is written?", sources) == llm.NOT_FOUND
     assert llm.generate_answer_result("What is written?", sources) == (
         llm.NOT_FOUND, "low_handwriting_confidence"
     )
+
+
+def test_all_garbled_handwriting_refuses_with_exact_reason():
+    sources = [
+        digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.05),
+        digital_chunk("Unreadable second crop", content_type="handwritten_ocr", ocr_confidence=0.11),
+    ]
+
+    answer, reason = llm.generate_answer_result("What is written?", sources)
+
+    assert answer == llm.NOT_FOUND
+    assert answer == (
+        "I could not find enough information in the uploaded documents "
+        "to answer this confidently."
+    )
+    assert reason == "low_handwriting_confidence"
+
+
+def test_model_decline_with_real_excerpt_is_not_answerable(monkeypatch):
+    monkeypatch.setattr(
+        llm, "ollama_chat", lambda messages, num_predict, timeout=180: llm.NOT_FOUND
+    )
+
+    answer, reason = llm.generate_answer_result(
+        "What is the answer?", [digital_chunk()]
+    )
+
+    assert answer == llm.NOT_FOUND
+    assert reason == "not_answerable"
+    assert reason != "no_evidence"
 
 
 def test_digital_evidence_needs_no_ocr_confidence():
@@ -103,12 +146,25 @@ def test_digital_evidence_needs_no_ocr_confidence():
     )
 
 
+def test_mixed_evidence_is_legible_when_digital_excerpt_is_present():
+    sources = [
+        digital_chunk("The tank holds 200 litres."),
+        digital_chunk(
+            "garbled text", content_type="handwritten_ocr", ocr_confidence=0.05
+        ),
+    ]
+
+    assert llm._evidence_is_legible(sources)
+
+
 def test_uncited_draft_is_replaced_by_the_refusal(monkeypatch):
     monkeypatch.setattr(
         llm, "ollama_chat", lambda messages, num_predict, timeout=180: "A plain guess."
     )
 
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "unsupported_claim"
+    )
 
 
 def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
@@ -123,9 +179,13 @@ def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == "The tank holds 200 litres. [S1]"
+    answer, reason = llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert answer == "The tank holds 200 litres. [S1]"
+    assert reason is None
     assert any("THIS ANSWER CANNOT BE USED AS-IS" in message for message in calls), \
         "the retry must ask for the citation rather than relax the requirement"
+    assert llm.citations_are_real(answer, 1)
 
 
 def test_two_uncited_drafts_are_refused_without_calling_the_verifier(monkeypatch):
@@ -137,7 +197,9 @@ def test_two_uncited_drafts_are_refused_without_calling_the_verifier(monkeypatch
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "unsupported_claim"
+    )
     assert len(calls) == 2, "one retry only - a refusal must not cost a verification"
 
 
@@ -150,7 +212,9 @@ def test_draft_is_rejected_when_the_verifier_fails(monkeypatch):
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "unsupported_claim"
+    )
     assert len(calls) == 2, "the draft must be verified before it is returned"
 
 
@@ -168,13 +232,38 @@ def test_verifier_refusal_reports_unsupported_claim(monkeypatch):
     )
 
 
+def test_mixed_evidence_answer_still_requires_real_citation_and_verification(monkeypatch):
+    calls = []
+    sources = [
+        digital_chunk("The tank holds 200 litres."),
+        digital_chunk(
+            "garbled text", content_type="handwritten_ocr", ocr_confidence=0.05
+        ),
+    ]
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages)
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        return "The tank holds 200 litres. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason = llm.generate_answer_result("Capacity?", sources)
+
+    assert answer == "The tank holds 200 litres. [S1]"
+    assert reason is None
+    assert llm.citations_are_real(answer, 2)
+    assert len(calls) == 2
+    assert calls[1][0]["content"].startswith("Return only PASS")
+
+
 def test_verified_draft_is_returned(monkeypatch):
     def fake_chat(messages, num_predict, timeout=180):
         return "PASS" if messages[0]["content"].startswith("Return only PASS") else "The tank holds 200 litres. [S1]"
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer("Capacity?", [digital_chunk()]) == "The tank holds 200 litres. [S1]"
     assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
         "The tank holds 200 litres. [S1]", None
     )
@@ -189,7 +278,9 @@ def test_exact_refusal_draft_short_circuits(monkeypatch):
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer("Anything?", [digital_chunk()]) == llm.NOT_FOUND
+    assert llm.generate_answer_result("Anything?", [digital_chunk()]) == (
+        llm.NOT_FOUND, "not_answerable"
+    )
     assert len(calls) == 1, "a refusal must not be sent through the verifier"
 
 
@@ -281,4 +372,4 @@ def test_generation_errors_surface_as_runtime_error(monkeypatch):
     )
 
     with pytest.raises(RuntimeError):
-        llm.generate_answer("Capacity?", [digital_chunk()])
+        llm.generate_answer_result("Capacity?", [digital_chunk()])

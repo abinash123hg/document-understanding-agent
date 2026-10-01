@@ -161,7 +161,7 @@ def test_llm_failure_becomes_a_service_error(client, uploaded, monkeypatch):
 
 @pytest.mark.parametrize(
     "reason",
-    ["no_evidence", "low_handwriting_confidence", "unsupported_claim"],
+    ["no_evidence", "low_handwriting_confidence", "unsupported_claim", "not_answerable"],
 )
 def test_chat_returns_exact_refusal_and_reason(client, uploaded, monkeypatch, reason):
     monkeypatch.setattr(

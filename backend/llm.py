@@ -143,22 +143,18 @@ def ollama_chat(messages: list[dict], num_predict: int, timeout: int = 180) -> s
 
 
 def _evidence_is_legible(sources: list[dict]) -> bool:
-    """Refuse to answer when the only evidence is text the recogniser itself was
-    unsure about. Low-confidence OCR is a reliable way to produce a confident,
-    wrong answer, and the verifier cannot catch it because the garbled text
-    really is in the excerpts.
-    """
-    scores = [
-        source.get("ocr_confidence")
-        for source in sources
-        if source.get("content_type") == "handwritten_ocr"
-    ]
-    usable = [float(score) for score in scores if score is not None]
+    """Require at least one citeable excerpt with trustworthy text."""
+    for source in sources:
+        if not str(source.get("text", "")).strip():
+            continue
+        if source.get("content_type") != "handwritten_ocr":
+            return True
 
-    if not usable:
-        return True
+        score = source.get("ocr_confidence")
+        if score is not None and float(score) >= settings.htr_min_confidence:
+            return True
 
-    return sum(usable) / len(usable) >= settings.htr_min_confidence
+    return False
 
 
 def _is_cited(answer: str) -> bool:
@@ -243,16 +239,16 @@ def generate_answer_result(
     if not sources:
         return NOT_FOUND, "no_evidence"
 
+    context = build_context(sources)
+    if not context:
+        return NOT_FOUND, "no_evidence"
+
     if not _evidence_is_legible(sources):
         logger.warning(
             "Refusing to answer: handwriting confidence is below %.2f",
             settings.htr_min_confidence,
         )
         return NOT_FOUND, "low_handwriting_confidence"
-
-    context = build_context(sources)
-    if not context:
-        return NOT_FOUND, "no_evidence"
 
     # build_context numbers the excerpts it actually emits, so the highest legal
     # label is the count of non-empty excerpts rather than the list length.
@@ -283,7 +279,7 @@ If nothing answers the question, respond exactly:
         raise RuntimeError(f"Ollama request failed: {error}") from error
 
     if not draft or draft.strip() == NOT_FOUND:
-        return NOT_FOUND, "no_evidence"
+        return NOT_FOUND, "not_answerable"
 
     if not citations_are_real(draft, excerpt_count):
         # A small local model sometimes states the right fact and still leaves
@@ -317,6 +313,4 @@ If nothing answers the question, respond exactly:
     return draft, None
 
 
-def generate_answer(question: str, sources: list[dict]) -> str:
-    """Backward-compatible text-only answer API."""
-    return generate_answer_result(question, sources)[0]
+
