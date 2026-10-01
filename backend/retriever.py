@@ -224,11 +224,17 @@ def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> lis
 
     rerank_scores = reranker().predict([(query, row["text"]) for row in rows])
 
+    # The cutoff is the leader minus a margin, not a fixed score. Absolute
+    # cross-encoder logits depend on how well-formed the passage is, so a fixed
+    # floor silently throws away every candidate from a chunked document while
+    # still letting through junk on a tidy one.
+    cutoff = max(rerank_scores) - settings.rerank_margin
+
     ranked = []
     dropped_scores = []
     for row, rerank_score in zip(rows, rerank_scores):
         row["rerank_score"] = float(rerank_score)
-        if row["rerank_score"] >= settings.min_rerank_score:
+        if row["rerank_score"] >= cutoff:
             row["score"] = round(row["rerank_score"], 4)
             ranked.append(row)
         else:
@@ -236,8 +242,8 @@ def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> lis
 
     if dropped_scores:
         logger.debug(
-            "Rerank floor %.2f dropped %d/%d candidates; scores=%s",
-            settings.min_rerank_score,
+            "Rerank cutoff %.2f dropped %d/%d candidates; dropped scores=%s",
+            cutoff,
             len(dropped_scores),
             len(rows),
             dropped_scores,

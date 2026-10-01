@@ -31,14 +31,12 @@ Return only facts explicitly stated in the excerpts. Do not use general
 knowledge, assumptions, common examples, recommendations, causal mechanisms,
 implications, trade-offs, or conclusions the excerpts do not state.
 
-Cite every factual sentence with the bracketed label of the excerpt it came
-from. Reply in one or two short sentences and end each one with its label, in
-exactly this shape:
-The survey covered twelve villages [S1]
+Write short lines and end EVERY line with the bracketed label of the excerpt
+that states that line, in exactly this shape: your line [S2]
 
-Never write anything after the label, never use headings or bullet points, and
-never invent a label or attach a number to an excerpt that does not state the
-fact.
+Never write anything after the label. Do not start a line with a bullet, hyphen,
+or colon, do not write an introductory line, never invent a label, and never
+attach a number to an excerpt that does not state the fact.
 
 If no excerpt answers the question, reply with exactly:
 {NOT_FOUND}
@@ -142,19 +140,21 @@ def ollama_chat(messages: list[dict], num_predict: int, timeout: int = 180) -> s
     return str(response.json().get("message", {}).get("content", "")).strip()
 
 
-def _evidence_is_legible(sources: list[dict]) -> bool:
-    """Require at least one citeable excerpt with trustworthy text."""
-    for source in sources:
-        if not str(source.get("text", "")).strip():
-            continue
-        if source.get("content_type") != "handwritten_ocr":
-            return True
+def _is_trusted_excerpt(source: dict) -> bool:
+    """
+    Decide whether one excerpt may be shown to the model as citable evidence.
 
-        score = source.get("ocr_confidence")
-        if score is not None and float(score) >= settings.htr_min_confidence:
-            return True
+    Unreadable OCR is dropped rather than merely flagged: an excerpt that stays
+    in the context keeps its [S<n]> label, and a model will happily cite the
+    garbled line instead of the legible one beside it.
+    """
+    if not str(source.get("text", "")).strip():
+        return False
+    if source.get("content_type") != "handwritten_ocr":
+        return True
 
-    return False
+    score = source.get("ocr_confidence")
+    return score is not None and float(score) >= settings.htr_min_confidence
 
 
 def _is_cited(answer: str) -> bool:
@@ -236,24 +236,23 @@ FAIL"""
 def generate_answer_result(
     question: str, sources: list[dict]
 ) -> tuple[str, str | None]:
-    if not sources:
+    candidates = [source for source in sources
+                  if str(source.get("text", "")).strip()]
+    if not candidates:
         return NOT_FOUND, "no_evidence"
 
-    context = build_context(sources)
-    if not context:
-        return NOT_FOUND, "no_evidence"
-
-    if not _evidence_is_legible(sources):
+    trusted = [source for source in candidates if _is_trusted_excerpt(source)]
+    if not trusted:
         logger.warning(
             "Refusing to answer: handwriting confidence is below %.2f",
             settings.htr_min_confidence,
         )
         return NOT_FOUND, "low_handwriting_confidence"
 
-    # build_context numbers the excerpts it actually emits, so the highest legal
-    # label is the count of non-empty excerpts rather than the list length.
-    excerpt_count = len([source for source in sources
-                         if str(source.get("text", "")).strip()])
+    context = build_context(trusted)
+    # Every trusted excerpt is non-blank, so the labels build_context emits run
+    # from [S1] to exactly this count.
+    excerpt_count = len(trusted)
 
     user_message = f"""SOURCE EXCERPTS:
 {context}
@@ -281,6 +280,12 @@ If nothing answers the question, respond exactly:
     if not draft or draft.strip() == NOT_FOUND:
         return NOT_FOUND, "not_answerable"
 
+    if excerpt_count == 1 and not _is_cited(draft):
+        # One excerpt was supplied, so which evidence the answer came from is
+        # already settled; only its label was missing. The verifier still has to
+        # confirm every claim against that excerpt.
+        draft = f"{draft.strip()} [S1]"
+
     if not citations_are_real(draft, excerpt_count):
         # A small local model sometimes states the right fact and still leaves
         # the label off, or numbers it past the excerpts it was given, and an
@@ -302,10 +307,13 @@ If nothing answers the question, respond exactly:
             timeout=180,
         )
 
+    if draft.strip() == NOT_FOUND:
+        return NOT_FOUND, "not_answerable"
+
     if not citations_are_real(draft, excerpt_count):
         logger.info("Rejected draft: excerpt citations missing or outside the "
                     "supplied excerpts")
-        return NOT_FOUND, "unsupported_claim"
+        return NOT_FOUND, "untraceable_citation"
 
     if not verify_answer(question, context, draft):
         return NOT_FOUND, "unsupported_claim"

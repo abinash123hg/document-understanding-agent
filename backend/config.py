@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     top_k: int = 4
     chunk_size: int = 400
     chunk_overlap: int = 60
-    min_rerank_score: float = -6.0
+    # Cross-encoder candidates are kept relative to the best score for the query
+    # rather than against an absolute cutoff: on chunked PDFs the score for the
+    # answer-bearing excerpt can sit near -10 while unrelated excerpts sit near
+    # -11, so only the gap between them carries information.
+    rerank_margin: float = 1.5
 
     # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"

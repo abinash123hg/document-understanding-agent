@@ -126,9 +126,10 @@ is 50 MB, enforced while streaming to disk, so an oversized file is rejected
 before it has been fully read.
 
 A `/chat` response contains `answer`, `document_name`, and its retrieved
-`sources`. A refusal also includes `refusal_reason`, identifying whether there
-was no evidence, no answer in the excerpts, unreadable handwriting, or an
-unsupported claim.
+`sources`. A refusal also includes `refusal_reason`: `no_evidence`,
+`low_handwriting_confidence`, `untraceable_citation`, `unsupported_claim`, or
+`not_answerable`, so a refusal says which guard stopped the answer rather than
+leaving the reading of it to guesswork.
 
 ---
 
@@ -140,8 +141,14 @@ One pipeline, in this order:
 2. **BM25** over that document's chunks.
 3. **Reciprocal Rank Fusion** of the two rankings, so agreement between them is
    rewarded without either score scale dominating.
-4. **Cross-encoder rerank** (`ms-marco-MiniLM-L6-v2`), with a floor on the
-   rerank score so weak matches are dropped rather than padded in.
+4. **Cross-encoder rerank** (`ms-marco-MiniLM-L6-v2`). Candidates are kept
+   relative to the best score for that query (`RERANK_MARGIN`) instead of
+   against an absolute cutoff: the score an excerpt receives depends on how
+   well-formed the passage is, so a fixed floor silently discards every
+   candidate from a chunked document (measured on a real portfolio PDF: the
+   best score obtainable for an answer-bearing query was -10.4) while still
+   letting weak matches through on a tidy one. The ranking separates on-topic
+   from off-topic; the answer stage decides whether to reply.
 
 Indexing happens once, at upload. Retrieval never re-indexes — that is what made
 earlier versions slow and what allowed stale vectors to outlive a delete.
@@ -159,18 +166,22 @@ Seven independent measures, each covered by a test:
    look grounded.
 3. **Citation requirement.** Every factual sentence must carry an `[S<n]>`
    label. A draft with no label gets one retry that shows the model its own
-   answer and asks for the labels; a second miss becomes the refusal.
+   answer and asks for the labels; a second miss becomes the refusal. The one
+   exception is an answer over a single excerpt, where which evidence the fact
+   came from is already settled and only the label was missing — the label is
+   then appended, and the verifier still has to approve every claim.
 4. **Citations must resolve.** A label pointing outside the supplied excerpts
    (`[S4]` when two excerpts exist) is a fabricated reference, so the answer is
-   refused instead of being shown with a dead link. The system never writes a
-   label itself.
+   refused instead of being shown with a dead link. Outside the single-excerpt
+   case above, the system never writes a label on the model's behalf.
 5. **Independent verifier.** A second pass checks that each claim is stated in
    the excerpts *and* that the draft answers the question asked. It fails
    closed: any error in the verifier means no answer.
-6. **OCR confidence gate.** At least one citeable excerpt must be digital text
-  or handwriting at or above `HTR_MIN_CONFIDENCE`. If every citeable excerpt
-  is low-confidence handwriting, the system refuses; one unreadable excerpt
-  does not veto a separate readable excerpt.
+6. **OCR confidence gate.** An excerpt is only shown to the model, and can only
+   be cited, when it is digital text or handwriting at or above
+   `HTR_MIN_CONFIDENCE`. Garbled handwriting is removed from the evidence
+   rather than merely flagged, so a low-confidence line cannot be quoted as an
+   answer; if nothing trustworthy remains, the system refuses.
 7. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
    commands.
 

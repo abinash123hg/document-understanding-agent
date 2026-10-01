@@ -74,6 +74,7 @@ class ChatResponse(BaseModel):
         Literal[
             "no_evidence",
             "low_handwriting_confidence",
+            "untraceable_citation",
             "unsupported_claim",
             "not_answerable",
         ]

@@ -93,6 +93,32 @@ def test_pdf_pages_keep_real_page_numbers(tmp_path):
     assert "Page 2 body text" in pages[1]["text"]
 
 
+def test_opening_a_pdf_silences_mupdf_stderr_without_hiding_failures(tmp_path):
+    """MuPDF prints complaints like 'No default Layer config' to stderr even for
+    pages that read fine. Turning the echo off must not turn rejection off."""
+    import pymupdf
+
+    shown = pymupdf.TOOLS.mupdf_display_errors()
+    try:
+        path = tmp_path / "one_page.pdf"
+        document = pymupdf.open()
+        page = document.new_page(width=595, height=842)
+        page.insert_text((72, 90), "Body text long enough to be read as digital.", fontsize=12)
+        document.save(str(path))
+        document.close()
+
+        assert pymupdf.TOOLS.mupdf_display_errors(True) is True
+        processor.extract_pdf_pages(path)
+        assert pymupdf.TOOLS.mupdf_display_errors() is False
+
+        broken = tmp_path / "broken.pdf"
+        broken.write_bytes(b"%PDF-1.4\nthis is not a real document body\n")
+        with pytest.raises(ValueError, match="Could not open this PDF"):
+            processor.extract_pdf_pages(broken)
+    finally:
+        pymupdf.TOOLS.mupdf_display_errors(shown)
+
+
 def test_image_only_pdf_page_is_routed_to_recognition(tmp_path, monkeypatch):
     import pymupdf
     from PIL import Image

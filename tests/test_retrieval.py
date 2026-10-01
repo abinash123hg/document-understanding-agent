@@ -103,18 +103,48 @@ def test_top_k_is_respected(indexed_pair):
     assert len(results) <= 1
 
 
-def test_configured_rerank_floor_controls_candidate_filtering(indexed_pair, monkeypatch):
+def test_rerank_margin_is_measured_from_the_leader_not_an_absolute_score(monkeypatch):
+    """Absolute cross-encoder logits track how well-formed a passage is, so a
+    fixed cutoff silently throws away every candidate from a chunked document
+    while still admitting junk from a tidy one. The leader must always survive
+    for the answer stage to judge."""
+    name = "margin_probe.txt"
+    storage.clear_document(name)
+    retriever.purge_document(name)
+    records = [
+        {
+            "id": f"{name}-0", "filename": name, "document_name": name,
+            "chunk_index": 0, "chunk_id": "1-0", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": TEXT_A,
+        },
+        {
+            "id": f"{name}-1", "filename": name, "document_name": name,
+            "chunk_index": 1, "chunk_id": "1-1", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": "Appendix tables of rainfall figures for the same district.",
+        },
+    ]
+    storage.add_chunks(records)
+    retriever.index_document(name)
+
     class FixedReranker:
         def predict(self, pairs):
-            return [-7.0] * len(pairs)
+            return [-7.0, -9.0][:len(pairs)]
 
     monkeypatch.setattr(retriever, "reranker", lambda: FixedReranker())
-    monkeypatch.setattr(settings, "min_rerank_score", -8.0)
 
-    assert retriever.retrieve("villages survey", document_name=DOC_A)
+    try:
+        monkeypatch.setattr(settings, "rerank_margin", 1.5)
+        results = retriever.retrieve("villages survey tanks", document_name=name)
+        assert [row["rerank_score"] for row in results] == [-7.0]
 
-    monkeypatch.setattr(settings, "min_rerank_score", -6.0)
-    assert retriever.retrieve("villages survey", document_name=DOC_A) == []
+        monkeypatch.setattr(settings, "rerank_margin", 3.0)
+        results = retriever.retrieve("villages survey tanks", document_name=name)
+        assert sorted(row["rerank_score"] for row in results) == [-9.0, -7.0]
+    finally:
+        storage.clear_document(name)
+        retriever.purge_document(name)
 
 
 def test_purge_removes_the_vectors_a_reupload_would_otherwise_reuse(indexed_pair):
@@ -159,7 +189,11 @@ def test_off_topic_question_ranks_below_an_on_topic_one(indexed_pair):
     off_topic = retriever.retrieve("What is the boiling point of mercury?", document_name=DOC_A)
 
     assert on_topic
-    best_off = max((row["rerank_score"] for row in off_topic), default=-99.0)
+    # An off-topic query still hands its best candidate over, because nothing
+    # shorter than the leader can be compared against a fixed score; the
+    # separation has to show up in the ranking the answer stage receives.
+    assert off_topic, "the leader is always available for the model to judge"
+    best_off = max(row["rerank_score"] for row in off_topic)
     assert best_off < on_topic[0]["rerank_score"]
 
 

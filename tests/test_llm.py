@@ -93,7 +93,7 @@ def test_fabricated_label_is_refused_without_reaching_the_verifier(monkeypatch):
 
     # one excerpt was supplied, so [S7] resolves to nothing
     assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
-        llm.NOT_FOUND, "unsupported_claim"
+        llm.NOT_FOUND, "untraceable_citation"
     )
     assert len(calls) == 2, "the label gets one correction attempt"
     assert not any(system.startswith("Return only PASS") for system in calls), \
@@ -103,7 +103,7 @@ def test_fabricated_label_is_refused_without_reaching_the_verifier(monkeypatch):
 def test_low_confidence_handwriting_is_not_answerable():
     sources = [digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.11)]
 
-    assert not llm._evidence_is_legible(sources)
+    assert not llm._is_trusted_excerpt(sources[0])
     assert llm.generate_answer_result("What is written?", sources) == (
         llm.NOT_FOUND, "low_handwriting_confidence"
     )
@@ -140,35 +140,62 @@ def test_model_decline_with_real_excerpt_is_not_answerable(monkeypatch):
 
 
 def test_digital_evidence_needs_no_ocr_confidence():
-    assert llm._evidence_is_legible([digital_chunk()])
-    assert llm._evidence_is_legible(
-        [digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.95)]
+    assert llm._is_trusted_excerpt(digital_chunk())
+    assert llm._is_trusted_excerpt(
+        digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.95)
     )
 
 
-def test_mixed_evidence_is_legible_when_digital_excerpt_is_present():
+def test_confident_handwriting_is_still_shown_alongside_digital_text():
     sources = [
         digital_chunk("The tank holds 200 litres."),
         digital_chunk(
-            "garbled text", content_type="handwritten_ocr", ocr_confidence=0.05
+            "Six households joined in June.",
+            content_type="handwritten_ocr", ocr_confidence=0.62,
         ),
     ]
 
-    assert llm._evidence_is_legible(sources)
+    assert [llm._is_trusted_excerpt(source) for source in sources] == [True, True]
 
 
-def test_uncited_draft_is_replaced_by_the_refusal(monkeypatch):
+def test_uncited_draft_over_two_excerpts_is_replaced_by_the_refusal(monkeypatch):
     monkeypatch.setattr(
         llm, "ollama_chat", lambda messages, num_predict, timeout=180: "A plain guess."
     )
 
-    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
-        llm.NOT_FOUND, "unsupported_claim"
+    sources = [digital_chunk(), digital_chunk("Six households joined in June.")]
+
+    assert llm.generate_answer_result("Capacity?", sources) == (
+        llm.NOT_FOUND, "untraceable_citation"
     )
+
+
+def test_single_unlabeled_answer_takes_its_label_from_the_only_excerpt(monkeypatch):
+    """Which excerpt the answer came from is already settled when exactly one
+    was supplied, so a missing label is a formatting failure, not a grounding
+    one. The verifier still has to approve every claim."""
+    calls = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages)
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        return "The tank holds 200 litres."
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason = llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert answer == "The tank holds 200 litres. [S1]"
+    assert reason is None
+    assert len(calls) == 2, "one draft plus one verification, no correction retry"
+    assert not any("THIS ANSWER CANNOT BE USED AS-IS" in str(message)
+                   for message in calls)
 
 
 def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
     calls = []
+    sources = [digital_chunk(), digital_chunk("Six households joined in June.")]
 
     def fake_chat(messages, num_predict, timeout=180):
         calls.append(messages[1]["content"])
@@ -179,17 +206,18 @@ def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    answer, reason = llm.generate_answer_result("Capacity?", [digital_chunk()])
+    answer, reason = llm.generate_answer_result("Capacity?", sources)
 
     assert answer == "The tank holds 200 litres. [S1]"
     assert reason is None
     assert any("THIS ANSWER CANNOT BE USED AS-IS" in message for message in calls), \
         "the retry must ask for the citation rather than relax the requirement"
-    assert llm.citations_are_real(answer, 1)
+    assert llm.citations_are_real(answer, 2)
 
 
 def test_two_uncited_drafts_are_refused_without_calling_the_verifier(monkeypatch):
     calls = []
+    sources = [digital_chunk(), digital_chunk("Six households joined in June.")]
 
     def fake_chat(messages, num_predict, timeout=180):
         calls.append(messages[0]["content"])
@@ -197,10 +225,38 @@ def test_two_uncited_drafts_are_refused_without_calling_the_verifier(monkeypatch
 
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
 
-    assert llm.generate_answer_result("Capacity?", [digital_chunk()]) == (
-        llm.NOT_FOUND, "unsupported_claim"
+    assert llm.generate_answer_result("Capacity?", sources) == (
+        llm.NOT_FOUND, "untraceable_citation"
     )
     assert len(calls) == 2, "one retry only - a refusal must not cost a verification"
+
+
+def test_unreadable_handwriting_never_reaches_the_model(monkeypatch):
+    """A garbled OCR line stays in the candidate list, but a model that is shown
+    it will cite it, and the number it carries is not evidence."""
+    calls = []
+    sources = [
+        digital_chunk("The tank holds 200 litres."),
+        digital_chunk(
+            "The tank holds 5000 litres.",
+            content_type="handwritten_ocr", ocr_confidence=0.05,
+        ),
+    ]
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages)
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        return "The tank holds 200 litres. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason = llm.generate_answer_result("Capacity?", sources)
+
+    assert answer == "The tank holds 200 litres. [S1]"
+    assert reason is None
+    assert all("5000" not in str(message) for message in calls), \
+        "an excerpt below the confidence floor must not be citable text"
 
 
 def test_draft_is_rejected_when_the_verifier_fails(monkeypatch):
@@ -237,7 +293,8 @@ def test_mixed_evidence_answer_still_requires_real_citation_and_verification(mon
     sources = [
         digital_chunk("The tank holds 200 litres."),
         digital_chunk(
-            "garbled text", content_type="handwritten_ocr", ocr_confidence=0.05
+            "Six households joined in June.",
+            content_type="handwritten_ocr", ocr_confidence=0.71,
         ),
     ]
 

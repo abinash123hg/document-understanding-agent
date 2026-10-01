@@ -131,6 +131,11 @@ def _open_pdf(path: Path):
     """Turn a broken file into a plain rejection instead of a stack trace."""
     import pymupdf
 
+    # MuPDF prints non-fatal complaints ("No default Layer config") straight to
+    # stderr even when the page reads fine. Failures that matter still raise,
+    # and the rejection below turns them into a 422.
+    pymupdf.TOOLS.mupdf_display_errors(False)
+
     try:
         return pymupdf.open(str(path))
     except Exception as error:
