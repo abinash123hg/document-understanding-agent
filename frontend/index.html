@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
@@ -258,7 +258,7 @@
 
     <div class="absolute bottom-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-t from-canvas via-canvas/95 to-transparent flex justify-center z-30">
       <div class="max-w-3xl w-full bg-inputBg border border-[#2c2c2c] rounded-2xl p-3 shadow-2xl flex flex-col gap-3">
-        <input id="fileInput" type="file" class="hidden" accept=".pdf,.docx,.doc,.pptx,.xlsx,.html,.htm,.txt,.png,.jpg,.jpeg,.webp">
+        <input id="fileInput" type="file" class="hidden" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg">
 
         <textarea id="questionInput" rows="2"
           placeholder="Upload and select a document first..."
@@ -279,6 +279,12 @@
                 <option value="">Select document</option>
               </select>
             </label>
+
+            <button id="removeButton" title="Remove selected document"
+              class="w-8 h-8 rounded-lg hover:bg-[#2c2c2c] text-mutedText hover:text-red-400 flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled>
+              <i class="fa-solid fa-trash text-xs"></i>
+            </button>
 
             <span id="statusText" class="hidden sm:inline text-[11px] text-mutedText"></span>
           </div>
@@ -301,6 +307,8 @@
 
   <script>
     const API_BASE = "http://127.0.0.1:8000";
+    // Mirrors NOT_FOUND in backend/llm.py; used only if a response has no answer.
+    const NOT_FOUND = "I could not find enough information in the uploaded documents to answer this confidently.";
     const chatFeed = document.getElementById("chatFeed");
     const welcomeCard = document.getElementById("welcomeCard");
     const fileInput = document.getElementById("fileInput");
@@ -316,7 +324,7 @@
     const newThreadIcon = document.getElementById("newThreadIcon");
     const clearChatIcon = document.getElementById("clearChatIcon");
 
-    let documents = [];
+    const removeButton = document.getElementById("removeButton");
 
     function setStatus(text, isError = false) {
       statusText.textContent = text || "";
@@ -559,27 +567,52 @@
       selectedDocumentName.textContent = selected || "No document selected";
       questionInput.disabled = !selected;
       sendButton.disabled = !selected || !questionInput.value.trim();
+      removeButton.disabled = !selected;
       questionInput.placeholder = selected
         ? "Ask a question about the selected document..."
         : "Upload and select a document first...";
     }
 
-    function addDocument(name, selectIt = true) {
-      if (!name) return;
+    function renderDocumentOptions(names, selected) {
+      documentSelect.innerHTML = '<option value="">Select document</option>' +
+        names.map(name =>
+          `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
+        ).join("");
 
-      if (!documents.includes(name)) {
-        documents.push(name);
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        documentSelect.appendChild(option);
-      }
-
-      if (selectIt) {
-        documentSelect.value = name;
-      }
-
+      documentSelect.value = names.includes(selected) ? selected : "";
       updateSelectedDocument();
+    }
+
+    async function loadDocuments(prefer) {
+      try {
+        const response = await fetch(`${API_BASE}/documents`);
+        if (!response.ok) throw new Error("Could not list documents");
+
+        const result = await response.json();
+        const names = (result.documents || []).map(item => item.document_name);
+        renderDocumentOptions(names, prefer || documentSelect.value);
+      } catch {
+        setStatus("Backend offline - start uvicorn", true);
+      }
+    }
+
+    async function removeDocument(name) {
+      if (!name) return;
+      if (!window.confirm(`Remove ${name} and its indexed text?`)) return;
+
+      setStatus("Removing...");
+      try {
+        const response = await fetch(
+          `${API_BASE}/documents/${encodeURIComponent(name)}`,
+          { method: "DELETE" }
+        );
+        if (!response.ok) throw new Error("Could not remove the document");
+
+        await loadDocuments("");
+        setStatus("Removed");
+      } catch (error) {
+        setStatus(error.message || "Removal failed", true);
+      }
     }
 
     async function uploadDocument(file) {
@@ -601,12 +634,18 @@
         const result = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          throw new Error(result.detail || result.error || "Upload failed");
+          const detail = typeof result.detail === "string"
+            ? result.detail
+            : (result.error || "Upload failed");
+          throw new Error(detail);
         }
 
-        const documentName = result.document_name || result.filename || file.name;
-        addDocument(documentName, true);
-        setStatus(`Indexed ${result.chunk_count ?? 0} chunks`);
+        await loadDocuments(result.document_name || file.name);
+
+        const scanned = result.ocr_page_count
+          ? ` · ${result.ocr_page_count} handwritten page(s)`
+          : "";
+        setStatus(`Indexed ${result.chunk_count ?? 0} chunks from ${result.page_count ?? 0} page(s)${scanned}`);
       } catch (error) {
         console.error(error);
         setStatus(error.message || "Upload failed", true);
@@ -648,7 +687,7 @@
 
         loading.remove();
         addAssistantMessage(
-          result.answer || "I could not find the answer in this document.",
+          result.answer || NOT_FOUND,
           Array.isArray(result.sources) ? result.sources : []
         );
         setStatus("");
@@ -667,6 +706,7 @@
     uploadIcon.addEventListener("click", () => fileInput.click());
 
     documentSelect.addEventListener("change", updateSelectedDocument);
+    removeButton.addEventListener("click", () => removeDocument(documentSelect.value));
 
     questionInput.addEventListener("input", () => {
       sendButton.disabled = !documentSelect.value || !questionInput.value.trim();
@@ -698,6 +738,7 @@
     });
 
     updateSelectedDocument();
+    loadDocuments();
   </script>
 </body>
 </html>
