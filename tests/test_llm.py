@@ -57,6 +57,29 @@ def test_citation_check_accepts_labels_only():
     assert not llm._is_cited("The tank holds about 100 litres, probably.")
 
 
+def test_labels_must_point_at_an_excerpt_that_was_supplied():
+    assert llm.citations_are_real("The tank holds 200 litres. [S1]", 2)
+    assert llm.citations_are_real("[S1] says 200 litres and [S2] says June", 2)
+    assert not llm.citations_are_real("The tank holds 200 litres. [S4]", 2)
+    assert not llm.citations_are_real("The tank holds 200 litres.", 2)
+
+
+def test_fabricated_label_is_refused_without_reaching_the_verifier(monkeypatch):
+    calls = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages[0]["content"])
+        return "The tank holds 200 litres. [S7]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    # one excerpt was supplied, so [S7] resolves to nothing
+    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert len(calls) == 2, "the label gets one correction attempt"
+    assert not any(system.startswith("Return only PASS") for system in calls), \
+        "an invented citation must never be sent for verification"
+
+
 def test_low_confidence_handwriting_is_not_answerable():
     sources = [digital_chunk(content_type="handwritten_ocr", ocr_confidence=0.11)]
 
@@ -77,6 +100,36 @@ def test_uncited_draft_is_replaced_by_the_refusal(monkeypatch):
     )
 
     assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+
+
+def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
+    calls = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages[1]["content"])
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        # First draft omits the label, the retry supplies it.
+        return "The tank holds 200 litres." if len(calls) == 1 else "The tank holds 200 litres. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    assert llm.generate_answer("Capacity?", [digital_chunk()]) == "The tank holds 200 litres. [S1]"
+    assert any("THIS ANSWER CANNOT BE USED AS-IS" in message for message in calls), \
+        "the retry must ask for the citation rather than relax the requirement"
+
+
+def test_two_uncited_drafts_are_refused_without_calling_the_verifier(monkeypatch):
+    calls = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        calls.append(messages[0]["content"])
+        return "Still no label."
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    assert llm.generate_answer("Capacity?", [digital_chunk()]) == llm.NOT_FOUND
+    assert len(calls) == 2, "one retry only - a refusal must not cost a verification"
 
 
 def test_draft_is_rejected_when_the_verifier_fails(monkeypatch):

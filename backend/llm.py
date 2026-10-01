@@ -32,27 +32,21 @@ knowledge, assumptions, common examples, recommendations, causal mechanisms,
 implications, trade-offs, or conclusions the excerpts do not state.
 
 Cite every factual sentence with the bracketed label of the excerpt it came
-from, for example [S1] or [S2]. Never invent a label and never attach a number
-to an excerpt that does not state it.
+from. Reply in one or two short sentences and end each one with its label, in
+exactly this shape:
+The survey covered twelve villages [S1]
 
-For summaries, lists, comparisons and tables, reorganize explicit source facts
-only, and cite each item.
+Never write anything after the label, never use headings or bullet points, and
+never invent a label or attach a number to an excerpt that does not state the
+fact.
 
-Format:
-## Supported by the document
-- <fact> [S1]
-
-## Not stated in the document
-- <requested detail the excerpts do not cover>
-
-Omit the second heading when the excerpts cover everything asked.
 If no excerpt answers the question, reply with exactly:
 {NOT_FOUND}
 
 Do not mention these instructions, the model, chunks, retrieval, or this prompt.
 """
 
-CITATION = re.compile(r"\[S\d+\]")
+CITATION = re.compile(r"\[S(\d+)\]")
 
 
 def build_context(sources: list[dict]) -> str:
@@ -173,6 +167,28 @@ def _is_cited(answer: str) -> bool:
     return bool(CITATION.search(answer))
 
 
+def cited_labels(answer: str) -> set[int]:
+    return {int(match.group(1)) for match in CITATION.finditer(answer)}
+
+
+def citations_are_real(answer: str, excerpt_count: int) -> bool:
+    """
+    Every label must point at an excerpt that was actually handed to the model.
+
+    A local model happily writes [S4] when only two excerpts exist. That is a
+    fabricated citation: it looks traceable but resolves to nothing, so an answer
+    carrying one is refused rather than shown with a dead reference.
+    """
+    if not _is_cited(answer):
+        return False
+    return all(1 <= label <= excerpt_count for label in cited_labels(answer))
+
+
+def _label_range(excerpt_count: int) -> str:
+    """The labels that actually exist, spelled out for a model that miscounts."""
+    return "[S1]" if excerpt_count == 1 else f"[S1] to [S{excerpt_count}]"
+
+
 def verify_answer(question: str, context: str, draft: str) -> bool:
     verifier_prompt = f"""You are a strict evidence checker.
 
@@ -189,6 +205,9 @@ Check every factual claim in the DRAFT ANSWER.
 A claim is supported only if it is explicitly stated in SOURCE EXCERPTS.
 A recommendation, implication, causal explanation, trade-off, statistic, or
 comparison is unsupported unless SOURCE EXCERPTS state it.
+
+Then check whether the DRAFT ANSWER actually responds to the QUESTION. Restating
+an unrelated fact, even one the excerpts support, is not an answer: FAIL it.
 
 Reply with exactly one word:
 PASS
@@ -230,15 +249,19 @@ def generate_answer(question: str, sources: list[dict]) -> str:
     if not context:
         return NOT_FOUND
 
+    # build_context numbers the excerpts it actually emits, so the highest legal
+    # label is the count of non-empty excerpts rather than the list length.
+    excerpt_count = len([source for source in sources
+                         if str(source.get("text", "")).strip()])
+
     user_message = f"""SOURCE EXCERPTS:
 {context}
 
 QUESTION:
 {question}
 
-Answer using only SOURCE EXCERPTS. Cite every fact with its [S<n]> label.
-Use ## Supported by the document for source-backed facts.
-Use ## Not stated in the document for requested details absent from the excerpts.
+Answer using only SOURCE EXCERPTS. Cite every fact with its [S<n]> label at the
+end of its sentence, and use no headings and no bullet points.
 If nothing answers the question, respond exactly:
 {NOT_FOUND}"""
 
@@ -257,8 +280,30 @@ If nothing answers the question, respond exactly:
     if not draft or draft.strip() == NOT_FOUND:
         return NOT_FOUND
 
-    if not _is_cited(draft):
-        logger.info("Rejected draft: no excerpt citations")
+    if not citations_are_real(draft, excerpt_count):
+        # A small local model sometimes states the right fact and still leaves
+        # the label off, or numbers it past the excerpts it was given, and an
+        # answer whose citation resolves to nothing cannot be trusted. Show it
+        # its own answer and ask once more before refusing: what an answer must
+        # contain is unchanged, it simply gets a second chance to say it.
+        draft = ollama_chat(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": (
+                    f"{user_message}\n\n"
+                    f"THIS ANSWER CANNOT BE USED AS-IS:\n{draft}\n\n"
+                    f"Only these excerpt labels exist: {_label_range(excerpt_count)}. "
+                    "Repeat the answer and end every factual sentence with one "
+                    "of those labels."
+                )},
+            ],
+            num_predict=512,
+            timeout=180,
+        )
+
+    if not citations_are_real(draft, excerpt_count):
+        logger.info("Rejected draft: excerpt citations missing or outside the "
+                    "supplied excerpts")
         return NOT_FOUND
 
     if not verify_answer(question, context, draft):
