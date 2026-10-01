@@ -48,7 +48,10 @@ embedded characters are rasterized and recognised, and those chunks are tagged
 
 Line boundaries are found on the binarized mask, but the crops themselves are
 taken from the grayscale image: thresholding throws away the stroke weight and
-grey levels the recogniser relies on.
+grey levels the recogniser relies on. Each line is then trimmed horizontally to
+its own ink. Leaving a wide empty strip on the right of the crop invites TrOCR to
+"finish" the line: on the sample it invented a tail reading `of 1.0002000200020002`
+for a sentence that ends in `survey`.
 
 ---
 
@@ -87,10 +90,11 @@ python -m http.server 5500
 
 and open `http://localhost:5500/frontend/index.html`.
 
-To regenerate the handwritten sample the tests use:
+To regenerate the handwritten sample the tests use, then re-measure it:
 
 ```bash
 python tools/make_handwritten_sample.py
+python tools/evaluate_handwriting.py
 ```
 
 ---
@@ -149,7 +153,7 @@ earlier versions slow and what allowed stale vectors to outlive a delete.
 
 ## How hallucination is blocked
 
-Six independent measures, each covered by a test:
+Seven independent measures, each covered by a test:
 
 1. **Document isolation.** Retrieval is scoped to one document name and returns
    nothing when none is selected. There is no global fallback.
@@ -157,13 +161,19 @@ Six independent measures, each covered by a test:
    store and the Chroma vectors, so removed text cannot be retrieved and cannot
    look grounded.
 3. **Citation requirement.** Every factual sentence must carry an `[S<n]>`
-   label. A draft with no label is discarded.
-4. **Independent verifier.** A second pass checks each claim against the
-   excerpts. It fails closed: any error in the verifier means no answer.
-5. **OCR confidence gate.** If the only evidence is handwriting the recogniser
+   label. A draft with no label gets one retry that shows the model its own
+   answer and asks for the labels; a second miss becomes the refusal.
+4. **Citations must resolve.** A label pointing outside the supplied excerpts
+   (`[S4]` when two excerpts exist) is a fabricated reference, so the answer is
+   refused instead of being shown with a dead link. The system never writes a
+   label itself.
+5. **Independent verifier.** A second pass checks that each claim is stated in
+   the excerpts *and* that the draft answers the question asked. It fails
+   closed: any error in the verifier means no answer.
+6. **OCR confidence gate.** If the only evidence is handwriting the recogniser
    scored below `HTR_MIN_CONFIDENCE`, the system refuses rather than answer
    from garbled text.
-6. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
+7. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
    commands.
 
 When the evidence is insufficient the answer is exactly:
@@ -176,40 +186,80 @@ When the evidence is insufficient the answer is exactly:
 ## Tests
 
 ```bash
-pytest                                    # 76 tests, about 20 seconds
+pytest                                    # 81 passed, 1 skipped, about 42 seconds
 pytest -m slow                            # +1 test: a real TrOCR pass, about 50s
 pytest tests/test_retrieval.py -k leak    # the document-isolation guarantee
 ```
 
 Five modules: `test_handwriting.py`, `test_processor.py`, `test_retrieval.py`,
-`test_llm.py`, `test_api.py`.
+`test_llm.py`, `test_api.py`. The one skip is
+`test_recognition_on_a_real_handwritten_sample`, which stays skipped until a real
+page is added (see below).
 
 Measured in this repository, Python 3.12.7, CPU only:
 
 ```
-76 passed, 1 deselected        (pytest -m "not slow")
-1 passed                       (pytest -m slow)
+80 passed, 2 deselected        (pytest -m "not slow")
+1 passed, 1 skipped            (pytest -m slow)
+81 passed, 1 skipped           (pytest)
+```
+
+`tools/live_check.py` runs the same guarantees against a **real** running
+backend, Ollama and TrOCR rather than mocks - upload, recognition, cited answer,
+refusal, isolation, delete, re-upload, corrupt file, invalid file:
+
+```bash
+uvicorn backend.main:app --port 8000
+python tools/live_check.py --base http://127.0.0.1:8000
+
+# oversize rejection needs a server whose limit the sample can exceed
+MAX_UPLOAD_SIZE_MB=1 uvicorn backend.main:app --port 8001
+python tools/live_check.py --base http://127.0.0.1:8001 --oversize-file big.pdf
 ```
 
 ### Recognition accuracy
 
 `sample_docs/handwritten_notes.png` is **synthetic** handwriting: five lines
-rendered with the cursive *Ink Free* font and tilted 2.5 degrees, with the exact
+rendered with the cursive *Ink Free* font, tilted 2.5 degrees, with the exact
 text kept in `handwritten_notes_ground_truth.txt` so error rates are measurable.
+The generator sizes the script from the measured text and rotates with
+`expand=True`, so no line can be cut off by the page edge.
 
 Measured on that page, `microsoft/trocr-base-handwritten`, greedy decoding:
 
 | Metric | Value |
 |--------|-------|
 | Lines segmented | 5 of 5 |
-| Character error rate | 0.050 |
-| Word error rate | 0.184 |
-| Mean token confidence | 0.884 |
+| Character error rate | 0.017 |
+| Word error rate | 0.204 |
+| Mean token confidence | 0.993 |
 
-CER and WER describe the recogniser only. They are not retrieval or answer
-accuracy, and **they are not a claim about real human handwriting** — a clean
-synthetic font is an easier target than a person's notes. Treat these as a
-pipeline check, not a benchmark.
+```bash
+python tools/evaluate_handwriting.py
+```
+
+CER and WER are computed over text lowercased and with whitespace collapsed, and
+spaces are deliberately kept in the character stream so CER cannot report a
+flattering zero.
+
+The word error rate is higher than it looks: not one word was misread. TrOCR
+emits sentence-final punctuation as its own token, so the ground truth's
+`district .` counts as two words against its one. CER, which sees the same
+characters either way, is 0.017.
+
+**Real human handwriting has not been measured.** This repository ships no
+person's writing, so there is no real-world accuracy figure to quote. To get one,
+put a page and its transcription in `sample_docs/real_handwritten/` and run the
+same measurement - see that folder's README:
+
+```bash
+python tools/evaluate_handwriting.py \
+  --image sample_docs/real_handwritten/page1.png \
+  --ground-truth sample_docs/real_handwritten/ground_truth.txt \
+  --label "Real handwritten sample"
+
+pytest -m slow
+```
 
 ### Speed
 
@@ -249,9 +299,13 @@ backend/
   config.py                      settings
   main.py                        FastAPI routes
 frontend/index.html              single-file UI
-tools/make_handwritten_sample.py
+tools/
+  make_handwritten_sample.py     regenerate the synthetic page, PDF and ground truth
+  evaluate_handwriting.py        CER, WER and confidence for any sample
+  live_check.py                  end-to-end run against a real backend and Ollama
 tests/                           five modules, one per pipeline concern
 sample_docs/                     digital and handwritten fixtures
+  real_handwritten/              empty until a genuine human page is added
 ```
 
 ---
@@ -262,9 +316,17 @@ sample_docs/                     digital and handwritten fixtures
   columns, or on a slanted baseline, degrades it.
 - Recognition runs on CPU in this configuration, so a many-page scan is slow. A
   GPU would change the timings, not the design.
-- The bundled handwritten sample is synthetic. Add your own page to
-  `sample_docs/` and re-measure before quoting any accuracy number.
+- Every accuracy figure above is **synthetic**. No real human handwriting has
+  been measured, so no real-world accuracy is claimed.
+- The answer contract is one sentence ending in its `[S<n]>` label. A larger
+  model than `qwen2.5:1.5b` follows that format more reliably: with the 1.5B
+  model, measured on the sample document, 6 of 7 answerable questions came back
+  cited and correct, while one was refused because the model kept writing an
+  `[S4]` label that does not exist. Refusing it was the guard working - an
+  uncited answer cannot be traced - and a bigger pulled model is the fix, not a
+  looser guard.
 - The verifier is the same local model as the generator. It catches restating
-  errors well; it is not a proof of correctness.
+  errors well; on the 1.5B model it occasionally accepts an answer that restates
+  a related fact instead of the one asked. It is not a proof of correctness.
 - DOCX tables are flattened during extraction, so cell alignment can be lost
   even when every value survives.
