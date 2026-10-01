@@ -72,6 +72,17 @@ the `ollama pull` command to run.
 
 ## Install and run
 
+### Windows: one click
+
+Double-click `start.bat`. It checks the virtual environment and the installed
+packages first — anything already present is reused, anything missing is
+downloaded once — then opens two terminal windows (backend on
+`http://127.0.0.1:8000`, frontend on `http://localhost:5500`), waits for the
+backend to answer, and opens Microsoft Edge on the app. It also warns if
+Ollama is not running. Closing both windows stops the app.
+
+### Any platform: manual
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows
@@ -82,13 +93,13 @@ pip install -r requirements.txt
 uvicorn backend.main:app --reload --port 8000
 ```
 
-Then serve the UI from the repository root so the CORS defaults match:
+In a second terminal, serve the UI — only the `frontend/` folder is exposed:
 
 ```bash
-python -m http.server 5500
+python -m http.server 5500 --bind 127.0.0.1 --directory frontend
 ```
 
-and open `http://localhost:5500/frontend/index.html`.
+and open `http://localhost:5500`.
 
 To regenerate the handwritten sample the tests use, then re-measure it:
 
@@ -299,6 +310,7 @@ backend/
   config.py                      settings
   main.py                        FastAPI routes
 frontend/index.html              single-file UI
+start.bat                        Windows one-click launcher
 tools/
   make_handwritten_sample.py     regenerate the synthetic page, PDF and ground truth
   evaluate_handwriting.py        CER, WER and confidence for any sample
