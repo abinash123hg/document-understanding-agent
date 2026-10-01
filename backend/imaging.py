@@ -118,6 +118,25 @@ def line_bands(mask: np.ndarray) -> list[tuple[int, int]]:
     ]
 
 
+def _ink_columns(mask: np.ndarray, start: int, end: int) -> tuple[int, int]:
+    """
+    First and last ink column inside one line band, padded for context.
+
+    A full-width crop leaves a wide empty strip to the right of the writing, and
+    TrOCR treats that silence as "the line is not finished" and invents a tail.
+    Trimming to the ink matches the tightly cropped lines the model was trained
+    on, without touching any of the recognised characters.
+    """
+    ink_per_column = np.count_nonzero(mask[start:end], axis=0)
+    columns = np.flatnonzero(ink_per_column)
+    if columns.size == 0:
+        return 0, mask.shape[1]
+    return (
+        max(0, int(columns[0]) - LINE_PAD),
+        min(mask.shape[1], int(columns[-1]) + 1 + LINE_PAD),
+    )
+
+
 def segment_lines(gray: np.ndarray) -> list[np.ndarray]:
     """
     Crop one image per handwritten line.
@@ -126,16 +145,20 @@ def segment_lines(gray: np.ndarray) -> list[np.ndarray]:
     grayscale image: thresholding discards the stroke weight and grey levels
     that TrOCR relies on.
     """
-    bands = line_bands(binarize(gray))
-    height, width = gray.shape[:2]
+    mask = binarize(gray)
+    bands = line_bands(mask)
+    height = gray.shape[0]
 
     if not bands:
         return [gray] if gray.size else []
 
-    return [
-        gray[max(0, start - LINE_PAD):min(height, end + LINE_PAD), 0:width]
-        for start, end in bands
-    ]
+    crops = []
+    for start, end in bands:
+        left, right = _ink_columns(mask, start, end)
+        crops.append(
+            gray[max(0, start - LINE_PAD):min(height, end + LINE_PAD), left:right]
+        )
+    return crops
 
 
 def preprocess_image(image: np.ndarray) -> tuple[list[np.ndarray], float]:

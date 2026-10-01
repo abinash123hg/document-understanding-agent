@@ -158,41 +158,56 @@ def test_model_error_explains_the_first_download(monkeypatch):
     handwriting._model_and_processor.cache_clear()
 
 
-@pytest.mark.slow
-def test_recognition_accuracy_on_the_shipped_sample():
-    """Measured on synthetic handwriting rendered with a cursive font. These
-    numbers describe that page, not real human handwriting."""
+def edit_distance(a, b):
+    """Levenshtein over any sequence - characters for CER, words for WER."""
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1,
+                               previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1]
+
+
+def normalize(lines):
+    """Lowercase and collapse whitespace, but keep the spaces themselves:
+    dropping them would hide word-boundary errors and report a flattering zero."""
+    return " ".join(" ".join(lines).lower().split())
+
+
+def error_rates(truth_lines, hypothesis_lines):
+    truth = normalize(truth_lines)
+    hypothesis = normalize(hypothesis_lines)
+    cer = edit_distance(truth, hypothesis) / max(1, len(truth))
+    wer = edit_distance(truth.split(), hypothesis.split()) / max(
+        1, len(truth.split())
+    )
+    return cer, wer
+
+
+def sample_dir():
     from pathlib import Path
 
+    return Path(__file__).resolve().parent.parent / "sample_docs"
+
+
+@pytest.mark.slow
+def test_recognition_accuracy_on_the_shipped_sample():
+    """Synthetic handwriting rendered with a cursive font. These numbers
+    describe that page, not real human handwriting."""
     if not handwriting.is_available():
         pytest.skip("TrOCR weights are not cached; run once with internet access")
 
-    root = Path(__file__).resolve().parent.parent
-    truth_lines = (root / "sample_docs/handwritten_notes_ground_truth.txt").read_text(
+    root = sample_dir()
+    truth_lines = (root / "handwritten_notes_ground_truth.txt").read_text(
         encoding="utf-8"
     ).strip().splitlines()
 
-    text, confidence = handwriting.recognize_image(root / "sample_docs/handwritten_notes.png")
+    text, confidence = handwriting.recognize_image(root / "handwritten_notes.png")
     hypothesis_lines = text.strip().splitlines()
 
-    def distance(a, b):
-        """Levenshtein over any sequence - words for WER, characters for CER."""
-        previous = list(range(len(b) + 1))
-        for i, ca in enumerate(a, 1):
-            current = [i]
-            for j, cb in enumerate(b, 1):
-                current.append(min(previous[j] + 1, current[j - 1] + 1,
-                                   previous[j - 1] + (ca != cb)))
-            previous = current
-        return previous[-1]
-
-    truth_words = " ".join(truth_lines).lower().split()
-    hypothesis_words = " ".join(hypothesis_lines).lower().split()
-
-    wer = distance(truth_words, hypothesis_words) / max(1, len(truth_words))
-    cer = distance("".join(truth_words), "".join(hypothesis_words)) / max(
-        1, len("".join(truth_words))
-    )
+    cer, wer = error_rates(truth_lines, hypothesis_lines)
 
     assert len(hypothesis_lines) == len(truth_lines)
     assert confidence > 0.5
@@ -200,3 +215,39 @@ def test_recognition_accuracy_on_the_shipped_sample():
     assert wer < 0.25
     assert not any(line.startswith("#") for line in hypothesis_lines)
     assert math.isfinite(cer)
+    assert math.isfinite(wer)
+
+
+@pytest.mark.slow
+def test_recognition_on_a_real_handwritten_sample():
+    """
+    The same measurement on genuine human handwriting.
+
+    This repository ships no person's writing, so the test stays skipped until a
+    page plus its transcription are dropped into sample_docs/real_handwritten/.
+    No real-world accuracy figure is claimed anywhere until that happens, which
+    is why there is no quality threshold here: the thresholds below only check
+    that the measurement itself is valid, whatever score a real page earns.
+    """
+    root = sample_dir() / "real_handwritten"
+    images = sorted(root.glob("*.png")) + sorted(root.glob("*.jpg"))
+    truth_file = root / "ground_truth.txt"
+
+    if not images or not truth_file.exists():
+        pytest.skip(
+            "No real handwritten sample with a ground truth transcription; "
+            "the project reports synthetic numbers only."
+        )
+    if not handwriting.is_available():
+        pytest.skip("TrOCR weights are not cached; run once with internet access")
+
+    truth_lines = truth_file.read_text(encoding="utf-8").strip().splitlines()
+    text, confidence = handwriting.recognize_image(images[0])
+    hypothesis_lines = text.strip().splitlines()
+
+    cer, wer = error_rates(truth_lines, hypothesis_lines)
+
+    assert hypothesis_lines
+    assert 0.0 <= cer <= 1.0
+    assert 0.0 <= wer <= 1.0
+    assert 0.0 < confidence <= 1.0

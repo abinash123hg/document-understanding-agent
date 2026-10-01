@@ -40,20 +40,38 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     raise SystemExit("No handwritten font found. Install Windows 'Ink Free'.")
 
 
+def _fit_font_size(draw: ImageDraw.ImageDraw, width: int, margin: int) -> int:
+    """Shrink the script until the longest line fits between the margins.
+
+    A fixed size was what clipped 'June 2024' and 'the region' off the right
+    edge, so the size is derived from the measured text instead of assumed.
+    """
+    size = 40
+    while size > 12:
+        font = _font(size)
+        widest = max(draw.textlength(line, font=font) for line in LINES)
+        if widest <= width - 2 * margin:
+            return size
+        size -= 2
+    raise SystemExit("Sample lines are too long for the rendered page.")
+
+
 def render_png(path: Path) -> None:
-    width, height, size = 1240, 1754, 44
+    width, height, margin = 1400, 1900, 90
     image = Image.new("L", (width, height), 255)
     draw = ImageDraw.Draw(image)
-    font = _font(size)
+    font = _font(_fit_font_size(draw, width, margin))
     rng = random.Random(7)
 
-    y = 180
+    y = 200
     for line in LINES:
         # Jitter each baseline so the page is not machine-straight.
-        draw.text((90, y + rng.randint(-4, 4)), line, font=font, fill=20)
-        y += 110
+        draw.text((margin, y + rng.randint(-4, 4)), line, font=font, fill=20)
+        y += 120
 
-    image = image.rotate(SKEW_DEGREES, resample=Image.BICUBIC, fillcolor=255)
+    # expand=True keeps the whole rotated page; without it the corners of a
+    # full-width line are cut off even when the unrotated text fit.
+    image = image.rotate(SKEW_DEGREES, resample=Image.BICUBIC, expand=True, fillcolor=255)
     image.save(path)
 
 
