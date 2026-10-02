@@ -15,6 +15,7 @@ Exit status is non-zero if any check fails.
 """
 
 import argparse
+import re
 import shutil
 import sys
 import tempfile
@@ -39,6 +40,38 @@ def check(name, ok, detail=""):
 def skip(name, why):
     """A check the server configuration makes impossible is not a failure."""
     print(f"[SKIP] {name} - {why}")
+
+
+def labels_resolve(payload, name):
+    """
+    Every [S<n>] in a successful answer must point at a source the response
+    returned. The API used to hand back the raw retriever list, so [S2] could
+    name an excerpt that was never shown to the model and [S3] could be a dead
+    link. A real server, real Ollama and real TrOCR are the only place this can
+    be proven without a mock agreeing with itself.
+    """
+    answer = str(payload.get("answer", ""))
+    sources = payload.get("sources") or []
+    labels = {int(m) for m in re.findall(r"\[S(\d+)\]", answer)}
+    in_range = labels and labels <= set(range(1, len(sources) + 1))
+    check(f"{name}: every citation label resolves to a returned source",
+          bool(in_range), f"labels {sorted(labels)} against {len(sources)} source(s)")
+    document = payload.get("document_name")
+    for label in sorted(labels):
+        source = sources[label - 1]
+        check(f"{name}: [S{label}] maps to a non-empty source of this document",
+              bool(str(source.get("text", "")).strip())
+              and source.get("filename") == document,
+              f"{source.get('filename')!r} page {source.get('page_number')}, "
+              f"{source.get('content_type')}")
+
+
+def refusal_is_clean(payload, name):
+    """A refusal must carry neither a citation nor evidence to cite."""
+    answer = str(payload.get("answer", ""))
+    check(f"{name}: refusal has no citation and no sources",
+          "[S" not in answer and payload.get("sources") in ([], None),
+          f"sources={payload.get('sources')} answer={answer[:80]!r}")
 
 
 def main():
@@ -76,9 +109,10 @@ def main():
     recognized_ok = "200" in answer.get("answer", "")
     cited = "[S" in answer.get("answer", "")
     check("answerable handwriting question is answered from the page", recognized_ok,
-          answer.get("answer", "")[:160])
+          f"reason={answer.get('refusal_reason')} {answer.get('answer', '')[:120]}")
     check("answer carries a citation", cited)
     sources = answer.get("sources", [])
+    labels_resolve(answer, "handwritten PNG answer")
     check("handwriting evidence is tagged handwritten_ocr",
           any(s.get("content_type") == "handwritten_ocr" for s in sources),
           str({s.get("content_type") for s in sources}))
@@ -89,6 +123,7 @@ def main():
         "document_name": image_doc}).json()
     check("unanswerable question is refused verbatim",
           refusal.get("answer", "") == NOT_FOUND, refusal.get("answer", "")[:160])
+    refusal_is_clean(refusal, "unanswerable question")
 
     # 4 - scanned PDF: page 1 is an image, page 2 carries a text layer
     response = upload(SAMPLES / "handwritten_notes.pdf")
@@ -107,7 +142,7 @@ def main():
         # skipped instead of failing a run that is only testing the limit.
         for name in ("only the image page is rasterised for OCR",
                      "page 1 is answered from the recognised handwriting",
-                     "page 1 evidence is tagged handwritten_ocr",
+                     "page 1 evidence came from an OCR engine, not the PDF text layer",
                      "page 2 is answered from the PDF text layer",
                      "page 2 evidence keeps its page number"):
             skip(name, f"PDF rejected with {response.status_code}")
@@ -125,9 +160,15 @@ def main():
         check("page 1 is answered from the recognised handwriting",
               "2024" in from_handwriting.get("answer", "") and "[S" in from_handwriting.get("answer", ""),
               from_handwriting.get("answer", "")[:160])
-        check("page 1 evidence is tagged handwritten_ocr",
-              any(s.get("content_type") == "handwritten_ocr"
-                  for s in from_handwriting.get("sources", [])))
+        labels_resolve(from_handwriting, "PDF page 1 answer")
+        page_one = [s for s in from_handwriting.get("sources", [])
+                    if s.get("page_number") == 1]
+        check("page 1 evidence came from an OCR engine, not the PDF text layer",
+              bool(page_one) and all(
+                  s.get("extraction_method") in {"trocr", "pytesseract"}
+                  for s in page_one),
+              str([(s.get("extraction_method"), s.get("content_type"))
+                   for s in page_one]))
 
         from_text_layer = requests.post(f"{base}/chat", timeout=600, json={
             "question": "What was the total budget in rupees?",
@@ -135,6 +176,7 @@ def main():
         check("page 2 is answered from the PDF text layer",
               "9.6" in from_text_layer.get("answer", ""),
               from_text_layer.get("answer", "")[:160])
+        labels_resolve(from_text_layer, "PDF page 2 answer")
         check("page 2 evidence keeps its page number",
               any(s.get("page_number") == 2 and s.get("content_type") == "digital_text"
                   for s in from_text_layer.get("sources", [])),
@@ -150,6 +192,7 @@ def main():
         "document_name": policy_doc}).json()
     check("question about document A is refused while document B is selected",
           leaked.get("answer", "") == NOT_FOUND, leaked.get("answer", "")[:160])
+    refusal_is_clean(leaked, "cross-document question")
 
     listed = requests.get(f"{base}/documents", timeout=30).json()
     names = {d.get("document_name") or d.get("name") for d in listed.get("documents", listed)}

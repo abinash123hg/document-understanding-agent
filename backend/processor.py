@@ -5,8 +5,10 @@ Routing rules
 - .txt / .md      -> read directly                       (digital_text)
 - .docx           -> python-docx                         (digital_text)
 - .pdf            -> embedded text per page when present (digital_text);
-                     only pages with no usable text are rasterized and
-                     recognised, which keeps normal PDFs near-instant
+                     a page with no usable text layer is rasterized and read by
+                     Tesseract first                       (digital_text),
+                     and only a page Tesseract cannot read goes to TrOCR
+                     (handwritten_ocr). This keeps printed scans on the fast path
 - .png/.jpg/.jpeg -> preprocessing + TrOCR               (handwritten_ocr)
 
 Every chunk keeps its document name, page number, chunk id, extraction method
@@ -17,6 +19,7 @@ import logging
 import re
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -100,6 +103,79 @@ def chunk_page_text(text: str) -> list[str]:
     return chunks
 
 
+def chunk_lines(lines: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """
+    Group recognised lines into chunks, each carrying its worst line.
+
+    A page-level mean hides the fact that one line of a page was unreadable, and
+    a chunk averages over only its own lines still lets three clean lines carry a
+    garbled fourth. Taking the minimum confidence of the lines that formed a
+    chunk means the number attached to a chunk is the number for the weakest
+    evidence inside it, which is what the answer stage should be refusing on.
+    """
+    kept = [(line.strip(), float(confidence))
+            for line, confidence in lines if str(line or "").strip()]
+    if not kept:
+        return []
+
+    size = max(400, int(settings.chunk_size))
+    overlap = max(0, min(int(settings.chunk_overlap), size // 2))
+
+    chunks: list[tuple[str, float]] = []
+    current: list[tuple[str, float]] = []
+    length = 0
+    index = 0
+
+    while index < len(kept):
+        line, confidence = kept[index]
+
+        if current and length + len(line) + 1 > size:
+            chunks.append(_join_chunk(current))
+
+            # Carry the tail of the finished chunk into the next one so a
+            # sentence split across the boundary stays readable. If even the
+            # carried lines leave no room for this line, the chunk simply starts
+            # fresh; carrying further would spin.
+            carry = _carry_lines(current, overlap)
+            carry_length = sum(len(item[0]) + 1 for item in carry)
+            if carry and carry_length + len(line) + 1 <= size:
+                current, length = carry, carry_length
+            else:
+                current, length = [], 0
+            continue
+
+        current.append((line, confidence))
+        length += len(line) + 1
+        index += 1
+
+    if current:
+        chunks.append(_join_chunk(current))
+
+    return chunks
+
+
+def _join_chunk(items: list[tuple[str, float]]) -> tuple[str, float]:
+    return "\n".join(line for line, _ in items), min(
+        confidence for _, confidence in items
+    )
+
+
+def _carry_lines(items: list[tuple[str, float]], overlap: int) -> list[tuple[str, float]]:
+    """Trailing lines of a finished chunk that fit inside the overlap budget."""
+    if overlap <= 0:
+        return []
+
+    carry: list[tuple[str, float]] = []
+    length = 0
+    for item in reversed(items):
+        extra = len(item[0]) + 1
+        if carry and length + extra > overlap:
+            break
+        carry.insert(0, item)
+        length += extra
+    return carry
+
+
 def _pixmap_to_gray(pixmap) -> np.ndarray:
     samples = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
         pixmap.height, pixmap.width, pixmap.n
@@ -142,76 +218,235 @@ def _open_pdf(path: Path):
         raise ValueError(f"Could not open this PDF: {error}") from error
 
 
+def _boilerplate_lines(raw_texts: list[str]) -> set[str]:
+    """Lines that repeat across pages, plus URL-only lines: headers, footers,
+    watermarks. They are noise for retrieval and they crowd out real content."""
+    frequency: Counter = Counter()
+    for raw_text in raw_texts:
+        frequency.update({
+            line.strip() for line in raw_text.splitlines() if line.strip()
+        })
+
+    return {
+        line for line, count in frequency.items()
+        if count >= 2 or URL_ONLY_TEXT.fullmatch(line.rstrip(".,;:)]}"))
+    }
+
+
+def _usable_page_text(raw_text: str, boilerplate: set[str]) -> str:
+    """
+    The page with its boilerplate removed.
+
+    This filtered text is what gets indexed. Keeping the raw page instead put
+    the repeated header in every chunk of every page, where it competed with the
+    sentence that actually answers a question.
+    """
+    return "\n".join(
+        line for line in raw_text.splitlines()
+        if line.strip() and line.strip() not in boilerplate
+    ).strip()
+
+
+def _printed_text_is_usable(text: str) -> bool:
+    """
+    Whether a printed-page OCR pass produced something worth keeping.
+
+    An empty result or a string that is mostly non-letters means the fast path
+    failed and the page should go to TrOCR rather than be indexed as garbage.
+    """
+    text = normalize_text(text)
+    if len(text) < EMBEDDED_TEXT_MIN_CHARS:
+        return False
+
+    content = [char for char in text if not char.isspace()]
+    letters = sum(1 for char in content if char.isalpha())
+    return letters >= 0.5 * len(content)
+
+
+def _tesseract_confidence(image) -> float | None:
+    """
+    Tesseract's own mean word confidence, scaled to 0..1 so it can share the
+    handwriting gate. None means the engine could not say.
+    """
+    try:
+        import pytesseract
+        from pytesseract import Output
+
+        data = pytesseract.image_to_data(image, output_type=Output.DICT)
+        scores = [
+            float(value) for value, word in zip(data.get("conf", []), data.get("text", []))
+            if str(word).strip() and float(value) >= 0
+        ]
+    except Exception as error:
+        logger.warning("Tesseract could not report a confidence for this page: %s", error)
+        return None
+
+    return round(sum(scores) / len(scores) / 100.0, 4) if scores else None
+
+
+def _printed_page_text(gray: np.ndarray) -> tuple[str, float | None] | None:
+    """
+    Read a rasterized page with Tesseract. None means "not usable, use TrOCR".
+
+    Printed scans are the case TrOCR is worst at and slowest for, so they go
+    through the local binary first. When that binary is not installed the page
+    is still recognised; an upload never dies over a missing optional tool.
+    """
+    if not settings.printed_scan_ocr:
+        return None
+
+    try:
+        import pytesseract
+        from PIL import Image
+
+        image = Image.fromarray(gray)
+        text = pytesseract.image_to_string(image)
+    except Exception as error:
+        logger.warning(
+            "Tesseract could not read this page (%s); falling back to TrOCR. "
+            "Install the tesseract-ocr binary to keep printed scans fast.",
+            error,
+        )
+        return None
+
+    stripped = text.strip()
+    if not _printed_text_is_usable(stripped):
+        return None
+
+    confidence = _tesseract_confidence(image)
+    if confidence is None:
+        # An OCR reading nobody can vouch for is not evidence, and handing it on
+        # without a score would let it past the confidence gate as though it were
+        # an embedded text layer. TrOCR reads the page instead.
+        return None
+
+    return stripped, confidence
+
+
+def _recognize_page(gray: np.ndarray) -> dict:
+    """One rasterized page: printed reader first, TrOCR only when it fails."""
+    printed = _printed_page_text(gray)
+    if printed is not None:
+        printed_text, confidence = printed
+        # Text that came out of an image is OCR output whatever engine made it, so
+        # it carries the confidence the same way a TrOCR page does and faces the
+        # same gate.
+        return {
+            "text": printed_text,
+            "content_type": DIGITAL,
+            "method": "pytesseract",
+            "ocr_confidence": confidence,
+        }
+
+    from backend import handwriting
+
+    lines = handwriting.recognize_page_lines(gray)
+    return {
+        "lines": lines,
+        "text": "\n".join(line for line, _ in lines if line.strip()),
+        "content_type": HANDWRITTEN,
+        "method": "trocr",
+        "ocr_confidence": round(handwriting.mean_confidence(lines), 4),
+    }
+
+
+def _recognize_scanned_pages(items: list[tuple[int, np.ndarray]]) -> list[dict]:
+    """
+    Recognize rasterized pages a few at a time, returning them in page order.
+
+    Rasterizing stays on the calling thread because a pymupdf document is not
+    safe to share; only recognition is handed to the pool, capped so two pages
+    never become forty running at once on a laptop CPU.
+    """
+    if not items:
+        return []
+
+    total = len(items)
+    results: list[dict] = []
+
+    with ThreadPoolExecutor(
+        max_workers=max(1, int(settings.ocr_pages_at_a_time))
+    ) as pool:
+        futures = [
+            (number, pool.submit(_recognize_page, gray))
+            for number, gray in items
+        ]
+
+        for finished, (number, future) in enumerate(futures, start=1):
+            page = future.result()
+            logger.info(
+                "Recognised scanned page %d of %d (PDF page %d)",
+                finished, total, number,
+            )
+            page["page_number"] = number
+            results.append(page)
+
+    results.sort(key=lambda page: page["page_number"])
+    return results
+
+
 def extract_pdf_pages(path: Path) -> list[dict]:
     """
     Per-page extraction with real page numbers.
 
-    Embedded text is read first because it is effectively free. A page only
-    pays the rasterize-and-recognise cost when it has no usable text layer,
-    which is what keeps ordinary PDF uploads fast.
+    Embedded text is read first because it is effectively free, and the filtered
+    version of it is what gets indexed. A page only pays the rasterize-and-
+    recognise cost when it has no usable text layer, which is what keeps normal
+    PDF uploads near-instant.
     """
-    import pymupdf
-
-    from backend import handwriting
-
-    pages: list[dict] = []
-    ocr_pages = 0
-
     document = _open_pdf(path)
     try:
         raw_texts = [page.get_text("text").strip() for page in document]
-        line_frequency = Counter()
-        for raw_text in raw_texts:
-            line_frequency.update({
-                line.strip() for line in raw_text.splitlines() if line.strip()
-            })
-        boilerplate = {
-            line for line, count in line_frequency.items()
-            if count >= 2 or URL_ONLY_TEXT.fullmatch(line.rstrip(".,;:)]}"))
-        }
+        boilerplate = _boilerplate_lines(raw_texts)
 
-        for number, (page, text) in enumerate(zip(document, raw_texts), start=1):
-            usable_text = "\n".join(
-                line for line in text.splitlines()
-                if line.strip() and line.strip() not in boilerplate
-            )
+        pages: list[dict] = []
+        needs_ocr: list[int] = []
 
-            if len(usable_text.strip()) >= EMBEDDED_TEXT_MIN_CHARS:
+        for number, raw_text in enumerate(raw_texts, start=1):
+            usable_text = _usable_page_text(raw_text, boilerplate)
+            if len(usable_text) >= EMBEDDED_TEXT_MIN_CHARS:
                 pages.append({
                     "page_number": number,
-                    "text": text,
+                    "text": usable_text,
                     "content_type": DIGITAL,
                     "method": "pymupdf",
                 })
                 continue
 
-            if ocr_pages >= settings.pdf_max_ocr_pages:
-                raise ValueError(
-                    f"This PDF has more than {settings.pdf_max_ocr_pages} "
-                    f"scanned pages. Split it into smaller files, or raise "
-                    f"PDF_MAX_OCR_PAGES in your .env."
-                )
+            if len(raw_text) >= EMBEDDED_TEXT_MIN_CHARS and not document[
+                number - 1
+            ].get_images():
+                # The page is pure text and every line of it was boilerplate, so
+                # there is nothing left to index. OCR-ing it would pay for a
+                # rasterised page and hand the same header back unfiltered.
+                # A page that also carries an image is a different matter: that
+                # is a scan with a typed header, and the image needs reading.
+                continue
 
-            ocr_pages += 1
-            pixmap = page.get_pixmap(dpi=settings.pdf_dpi, alpha=False)
-            ocr_text, confidence = handwriting.recognize_array(
-                _downscale(_pixmap_to_gray(pixmap))
-            )
-            logger.info(
-                "Recognised page %d of %s (confidence %.3f)",
-                number, path.name, confidence,
+            needs_ocr.append(number)
+
+        # Decided before a single page is rasterized: an oversized scan is
+        # rejected immediately instead of after minutes of work that is thrown
+        # away anyway.
+        if len(needs_ocr) > settings.pdf_max_ocr_pages:
+            raise ValueError(
+                f"This PDF has {len(needs_ocr)} scanned pages, but at most "
+                f"{settings.pdf_max_ocr_pages} are recognised per upload. Split "
+                f"it into files of {settings.pdf_max_ocr_pages} scanned pages or "
+                f"fewer and upload each one, or raise PDF_MAX_OCR_PAGES in .env."
             )
 
-            pages.append({
-                "page_number": number,
-                "text": ocr_text,
-                "content_type": HANDWRITTEN,
-                "method": "trocr",
-                "ocr_confidence": round(confidence, 4),
-            })
+        items = [
+            (number, _downscale(_pixmap_to_gray(
+                document[number - 1].get_pixmap(dpi=settings.pdf_dpi, alpha=False)
+            )))
+            for number in needs_ocr
+        ]
     finally:
         document.close()
 
+    pages.extend(_recognize_scanned_pages(items))
+    pages.sort(key=lambda page: page["page_number"])
     return pages
 
 
@@ -229,17 +464,31 @@ def extract_docx(path: Path) -> str:
 
 
 def _chunk_records(
-    text: str,
+    chunks: list,
     document_name: str,
     page_number,
     content_type: str,
     method: str,
     start_index: int,
-    ocr_confidence=None,
+    page_confidence=None,
 ) -> list[dict]:
+    """
+    Turn chunked text into stored records.
+
+    A chunk arrives either as plain text or as (text, confidence) from the
+    handwritten path, where the confidence is the minimum of the lines inside it.
+    page_confidence covers a chunk that came out of an OCR engine without per-line
+    scores, so it still faces the confidence gate instead of reading as an
+    embedded text layer.
+    """
     records = []
 
-    for index, chunk in enumerate(chunk_page_text(text)):
+    for index, item in enumerate(chunks):
+        if isinstance(item, tuple):
+            chunk, confidence = item
+        else:
+            chunk, confidence = item, page_confidence
+
         position = start_index + index
         record = {
             "id": str(uuid.uuid4()),
@@ -252,8 +501,8 @@ def _chunk_records(
             "extraction_method": method,
             "text": chunk,
         }
-        if ocr_confidence is not None:
-            record["ocr_confidence"] = ocr_confidence
+        if confidence is not None:
+            record["ocr_confidence"] = round(float(confidence), 4)
         records.append(record)
 
     return records
@@ -282,11 +531,22 @@ def process_upload(path: Path, original_name: str) -> dict:
         for page in pages:
             methods.add(page["method"])
             content_types.add(page["content_type"])
+
             if page["content_type"] == HANDWRITTEN:
+                # Recognised lines keep their own confidence, so the chunk they
+                # form is scored by its weakest line.
+                chunks = chunk_lines(page["lines"])
+            else:
+                chunks = chunk_page_text(page["text"])
+
+            # A page that was rasterized and read by an engine, whichever one it
+            # was. Counting only TrOCR pages reported "0 OCR pages" for a scan
+            # that had just spent seconds under Tesseract.
+            if page["method"] in {"trocr", "pytesseract"}:
                 ocr_pages += 1
 
             records.extend(_chunk_records(
-                page["text"], original_name, page["page_number"],
+                chunks, original_name, page["page_number"],
                 page["content_type"], page["method"], len(records),
                 page.get("ocr_confidence"),
             ))
@@ -295,27 +555,28 @@ def process_upload(path: Path, original_name: str) -> dict:
         methods.add("python-docx")
         content_types.add(DIGITAL)
         records.extend(_chunk_records(
-            extract_docx(path), original_name, None, DIGITAL, "python-docx", 0
+            chunk_page_text(extract_docx(path)),
+            original_name, None, DIGITAL, "python-docx", 0
         ))
 
     elif ext in {".txt", ".md"}:
         methods.add("plaintext")
         content_types.add(DIGITAL)
         records.extend(_chunk_records(
-            path.read_text(encoding="utf-8", errors="ignore"),
+            chunk_page_text(path.read_text(encoding="utf-8", errors="ignore")),
             original_name, None, DIGITAL, "plaintext", 0,
         ))
 
     elif ext in {".png", ".jpg", ".jpeg"}:
-        from backend import handwriting
+        from backend import handwriting, imaging
 
-        text, confidence = handwriting.recognize_image(path)
+        lines = handwriting.recognize_page_lines(imaging.load_image(path))
         methods.add("trocr")
         content_types.add(HANDWRITTEN)
         page_count = 1
         ocr_pages = 1
         records.extend(_chunk_records(
-            text, original_name, 1, HANDWRITTEN, "trocr", 0, round(confidence, 4)
+            chunk_lines(lines), original_name, 1, HANDWRITTEN, "trocr", 0
         ))
 
     else:

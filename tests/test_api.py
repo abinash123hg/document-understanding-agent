@@ -115,9 +115,16 @@ def test_chat_for_an_unuploaded_document_refuses(client):
 
 
 def test_chat_returns_citable_sources(client, uploaded, monkeypatch):
+    trusted = [
+        {
+            "filename": DOC, "document_name": DOC, "chunk_index": 0,
+            "chunk_id": "0-0", "page_number": 1, "content_type": "digital_text",
+            "extraction_method": "plaintext", "score": 4.2, "text": BODY,
+        }
+    ]
     monkeypatch.setattr(
         llm, "generate_answer_result",
-        lambda question, sources: ("Twelve villages were surveyed. [S1]", None),
+        lambda question, sources: ("Twelve villages were surveyed. [S1]", None, trusted),
     )
 
     body = client.post(
@@ -133,12 +140,74 @@ def test_chat_returns_citable_sources(client, uploaded, monkeypatch):
     assert source["content_type"] == "digital_text"
 
 
+def retrieved_row(**overrides):
+    row = {
+        "id": "r",
+        "filename": DOC,
+        "document_name": DOC,
+        "chunk_index": 0,
+        "chunk_id": "1-0",
+        "page_number": 1,
+        "content_type": "digital_text",
+        "extraction_method": "pymupdf",
+        "score": 1.0,
+        "text": "A legible sentence.",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_sources_returned_match_the_labels_the_model_used(client, monkeypatch):
+    """
+    The raw retrieval list must never be handed to the reader.
+
+    It also contains excerpts the answer stage filtered out, so its index 1 is
+    not the excerpt a printed [S2] points at, and following that citation lands
+    on a passage the answer did not use.
+    """
+    unreadable = retrieved_row(
+        chunk_index=0, chunk_id="1-0", content_type="handwritten_ocr",
+        extraction_method="trocr", ocr_confidence=0.02,
+        text="Unreadable scratchings.",
+    )
+    digital = retrieved_row(
+        chunk_index=5, chunk_id="1-5", score=2.5,
+        text="Twelve villages were surveyed.",
+    )
+    handwritten = retrieved_row(
+        chunk_index=9, chunk_id="1-9", content_type="handwritten_ocr",
+        extraction_method="trocr", ocr_confidence=0.90, score=4.0,
+        text="Each household received a 200 litre tank.",
+    )
+
+    monkeypatch.setattr(retriever, "retrieve", lambda **kwargs: [unreadable, digital, handwritten])
+
+    def fake_chat(messages, num_predict, timeout=180):
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        return "Each household received a 200 litre tank. [S2]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    body = client.post(
+        "/chat", json={"question": "What did each household get?", "document_name": DOC}
+    ).json()
+
+    assert [row["chunk_id"] for row in body["sources"]] == ["1-5", "1-9"]
+    assert "Unreadable" not in str(body["sources"])
+    assert body["sources"][1]["text"].startswith("Each household")
+
+    # Every label in the answer resolves to the source at that index.
+    for label in llm.cited_labels(body["answer"]):
+        assert body["sources"][label - 1]["text"] in body["answer"]
+
+
 def test_the_retrieved_sources_are_scoped_to_one_document(client, uploaded, monkeypatch):
     captured = {}
 
     def spy(question, sources):
         captured["documents"] = {row["document_name"] for row in sources}
-        return "Twelve villages. [S1]", None
+        return "Twelve villages. [S1]", None, list(sources)
 
     monkeypatch.setattr(llm, "generate_answer_result", spy)
 
@@ -168,7 +237,7 @@ def test_chat_returns_exact_refusal_and_reason(client, uploaded, monkeypatch, re
     monkeypatch.setattr(
         llm,
         "generate_answer_result",
-        lambda question, sources: (llm.NOT_FOUND, reason),
+        lambda question, sources: (llm.NOT_FOUND, reason, []),
     )
 
     body = client.post(
@@ -180,6 +249,61 @@ def test_chat_returns_exact_refusal_and_reason(client, uploaded, monkeypatch, re
         "to answer this confidently."
     )
     assert body["refusal_reason"] == reason
+    # A refusal carries no evidence list: citation chips beside a refusal would
+    # point at excerpts that produced no answer.
+    assert body["sources"] == []
+
+
+def test_refused_chat_truncation_cannot_leak_a_citation(client, uploaded, monkeypatch):
+    """The API keeps the refusal reason and the source list in agreement."""
+    monkeypatch.setattr(
+        llm, "generate_answer_result",
+        lambda question, sources: (llm.NOT_FOUND, "untraceable_citation", []),
+    )
+
+    body = client.post(
+        "/chat", json={"question": "Anything?", "document_name": DOC}
+    ).json()
+
+    assert body["refusal_reason"] == "untraceable_citation"
+    assert "[S" not in body["answer"]
+
+
+def test_source_text_is_capped_for_the_response(client, uploaded, monkeypatch):
+    long_excerpt = retrieved_row(text="W" * 900)
+
+    monkeypatch.setattr(retriever, "retrieve", lambda **kwargs: [long_excerpt])
+
+    def fake_chat(messages, num_predict, timeout=180):
+        if messages[0]["content"].startswith("Return only PASS"):
+            return "PASS"
+        return "The document describes this. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    body = client.post(
+        "/chat", json={"question": "Anything?", "document_name": DOC}
+    ).json()
+
+    assert len(body["sources"][0]["text"]) == 400
+
+
+def test_cors_defaults_cover_every_origin_the_page_can_come_from():
+    """The frontend is served from 5500, and index.html can also be opened off
+    the backend's own port; a fourth origin from Live Server must not fail the
+    browser check. A wildcard with credentials is not an option."""
+    origins = {o.strip() for o in settings.cors_origins.split(",") if o.strip()}
+
+    assert origins >= {
+        "http://localhost:5500", "http://127.0.0.1:5500",
+        "http://localhost:8000", "http://127.0.0.1:8000",
+    }
+    assert "*" not in origins
+
+
+def test_upload_limit_default_is_a_hundred_megabytes():
+    assert settings.max_upload_size_mb == 100
+    assert settings.max_upload_bytes == 100 * 1024 * 1024
 
 
 def test_empty_question_is_rejected(client, uploaded):

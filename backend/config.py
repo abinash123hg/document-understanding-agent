@@ -14,9 +14,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Local language model (Ollama)
+    # Local language model (Ollama).
+    # qwen2.5:3b is the ceiling for this laptop: 1.5b drops citation labels often
+    # enough to be refused on its own output, and 7b is 4.7 GB, which blows the
+    # ~5-6 GB budget once TrOCR is loaded alongside it.
     ollama_url: str = "http://127.0.0.1:11434"
-    llm_model: str = "qwen2.5:1.5b"
+    llm_model: str = "qwen2.5:3b"
 
     # Handwriting recognition (TrOCR)
     htr_model: str = "microsoft/trocr-base-handwritten"
@@ -24,19 +27,36 @@ class Settings(BaseSettings):
     # Lines scoring below this are still kept, but the page is flagged so the
     # answer stage can refuse rather than build on unreadable OCR.
     htr_min_confidence: float = 0.30
+    # Lines decoded per TrOCR call. Larger batches do not help on CPU and hold
+    # more pixel tensors in memory at once.
+    trocr_line_batch: int = 4
 
     # PDF handling. Embedded text is always tried first because it is instant;
     # only pages with no usable text are rasterized and recognised.
-    pdf_dpi: int = 200
+    pdf_dpi: int = 150
     pdf_max_dimension: int = 2000
     # Hard ceiling on the slow path, so a huge scanned PDF cannot hang an upload.
-    pdf_max_ocr_pages: int = 50
+    # Above this the upload is rejected with instructions to split the file.
+    pdf_max_ocr_pages: int = 40
+    # Pages rasterized and recognised together. Two keeps peak memory down
+    # without leaving the CPU idle the way fully serial pages would.
+    ocr_pages_at_a_time: int = 2
+    # Printed scans are read by the local Tesseract binary first, which is orders
+    # of magnitude faster than TrOCR; TrOCR only sees pages Tesseract garbles.
+    printed_scan_ocr: bool = True
+    # fastNlMeansDenoising is the single slowest step in preprocessing and the
+    # recognition accuracy it buys on these scans is marginal, so it is opt-in.
+    denoise_images: bool = False
 
-    # CORS
-    cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500"
+    # CORS. The page is served from 5500 (or Live Server's 5500), and opening it
+    # straight from the backend's own port must work too.
+    cors_origins: str = (
+        "http://localhost:5500,http://127.0.0.1:5500,"
+        "http://localhost:8000,http://127.0.0.1:8000"
+    )
 
     # Upload limits
-    max_upload_size_mb: int = 50
+    max_upload_size_mb: int = 100
 
     # Retrieval
     top_k: int = 4

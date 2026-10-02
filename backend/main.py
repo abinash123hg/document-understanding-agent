@@ -198,14 +198,16 @@ def chat(request: ChatRequest):
 
     # Retrieval is scoped to the selected document and fails closed when no
     # document is selected, so an answer can never come from another file.
-    sources = retriever.retrieve(
+    retrieved = retriever.retrieve(
         query=question,
         top_k=settings.top_k,
         document_name=request.document_name,
     )
 
     try:
-        answer, refusal_reason = llm.generate_answer_result(question, sources)
+        answer, refusal_reason, trusted = llm.generate_answer_result(
+            question, retrieved
+        )
     except Exception as error:
         logger.exception("LLM generation failed")
         raise HTTPException(
@@ -213,6 +215,11 @@ def chat(request: ChatRequest):
             f"The local language model is unavailable: {error}",
         )
 
+    # Sources are the excerpts that were labelled [S1]..[Sn] for the model, in
+    # that order. The raw retrieval list is never returned: it also carries
+    # chunks that were filtered out, so its index 1 is not the excerpt a printed
+    # [S2] refers to, and a reader following that citation lands on the wrong
+    # passage.
     return ChatResponse(
         answer=answer,
         sources=[
@@ -226,7 +233,7 @@ def chat(request: ChatRequest):
                 score=float(source.get("score") or 0.0),
                 text=str(source.get("text", ""))[:400],
             )
-            for source in sources
+            for source in trusted
         ],
         document_name=request.document_name,
         refusal_reason=refusal_reason,

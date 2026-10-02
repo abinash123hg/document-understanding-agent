@@ -154,6 +154,33 @@
       0%, 100% { opacity: .25; transform: translateY(0); }
       50% { opacity: 1; transform: translateY(-2px); }
     }
+
+    .citation-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: .25rem;
+      margin-left: .3rem;
+      padding: .05rem .45rem;
+      border: 1px solid #4f46e5;
+      border-radius: 9999px;
+      background: rgba(79, 70, 229, .14);
+      color: #c7d2fe;
+      font-size: 10px;
+      line-height: 1.6;
+      vertical-align: baseline;
+      cursor: pointer;
+      transition: background .15s ease, color .15s ease;
+    }
+
+    .citation-chip:hover {
+      background: rgba(79, 70, 229, .34);
+      color: #fff;
+    }
+
+    .source-item.citation-flash {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, .35);
+    }
   </style>
 </head>
 
@@ -488,6 +515,29 @@
       return `${source.filename || "Selected document"}${page}${chunk}`;
     }
 
+    function renderAnswer(answer, sources) {
+      const html = renderMarkdown(answer);
+
+      // A label only becomes a chip when the excerpt it points at was actually
+      // returned. The answer stage sends the numbered excerpts and nothing else,
+      // so an unresolved label would be a citation that opens a blank card.
+      return html.replace(/\[S(\d+)\]/g, (match, label) => {
+        const number = Number(label);
+        if (!number || number > sources.length) return match;
+        return `<button class="citation-chip" data-label="${number}" `
+          + `title="Show excerpt ${number}">S${number}</button>`;
+      });
+    }
+
+    function focusSource(card) {
+      const details = card.closest("details");
+      if (details) details.open = true;
+
+      card.classList.add("citation-flash");
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => card.classList.remove("citation-flash"), 1600);
+    }
+
     function addAssistantMessage(answer, sources = [], refusalReason = null) {
       const wrapper = document.createElement("div");
       wrapper.className = "flex gap-3 items-start";
@@ -510,13 +560,13 @@
             <summary class="px-3.5 py-3 flex items-center justify-between gap-3 text-xs text-gray-300 hover:bg-white/[.025] transition">
               <span class="flex items-center gap-2 min-w-0">
                 <i class="fa-solid fa-book-open text-indigo-400"></i>
-                <span>${sources.length} retrieved source${sources.length === 1 ? "" : "s"}</span>
+                <span>${sources.length} cited excerpt${sources.length === 1 ? "" : "s"}</span>
               </span>
               <i class="source-chevron fa-solid fa-chevron-down text-[10px] text-mutedText transition-transform"></i>
             </summary>
             <div class="border-t border-borderCol p-2.5 space-y-2">
               ${sources.map((source, index) => `
-                <div class="bg-cardBg border border-[#303030] rounded-lg p-3">
+                <div id="src-${index + 1}" class="source-item bg-cardBg border border-[#303030] rounded-lg p-3">
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
                       <div class="text-[11px] text-indigo-300 font-medium truncate">S${index + 1} · ${escapeHtml(sourceTitle(source))}</div>
@@ -539,7 +589,7 @@
         </div>
         <div class="min-w-0 flex-1">
           <article class="message-answer text-sm leading-relaxed text-gray-200">
-            ${renderMarkdown(answer)}
+            ${renderAnswer(answer, sources)}
           </article>
           ${refusalHtml}
           ${sourceHtml}
@@ -558,6 +608,13 @@
       wrapper.querySelectorAll(".copy-source").forEach((button, index) => {
         button.addEventListener("click", async () => {
           await copyText(sources[index].text || "");
+        });
+      });
+
+      wrapper.querySelectorAll(".citation-chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+          const card = wrapper.querySelector(`#src-${chip.dataset.label}`);
+          if (card) focusSource(card);
         });
       });
 

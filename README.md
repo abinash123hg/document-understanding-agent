@@ -18,7 +18,7 @@ Each stage is a separate module, so it can be tested and replaced on its own.
 | # | Stage | Module |
 |---|-------|--------|
 | 1 | Image loading | `backend/imaging.py` |
-| 2 | Preprocessing: denoise, binarize, deskew, line segmentation | `backend/imaging.py` |
+| 2 | Preprocessing: binarize, deskew, line segmentation (denoise is opt-in, off by default) | `backend/imaging.py` |
 | 3 | Handwriting recognition (TrOCR) | `backend/handwriting.py` |
 | 4 | Text normalization | `backend/processor.py` |
 | 5 | Chunking | `backend/processor.py` |
@@ -26,33 +26,54 @@ Each stage is a separate module, so it can be tested and replaced on its own.
 | 7 | Retrieval: dense + BM25 + rerank | `backend/retriever.py` |
 | 8 | Answer generation and verification | `backend/llm.py` |
 
-Routing is decided per page, not per file: a PDF with a real text layer is read
-with PyMuPDF and never goes near the recogniser. Only pages with fewer than 20
-embedded characters are rasterized and recognised, and those chunks are tagged
-`content_type: "handwritten_ocr"`.
+Routing is decided per page, not per file:
+
+1. A page with a real text layer is read with PyMuPDF and never goes near an OCR
+   engine. Repeated header/footer lines and URL-only lines are dropped before
+   anything is indexed, so the boilerplate cannot be retrieved and cited as
+   content. A page that is *only* boilerplate and carries no image is dropped
+   rather than sent to OCR - recognising it would hand the same header back
+   unfiltered. A page that carries an image is still a scan, even when someone
+   has typed a header over it, and still gets read.
+2. A page with fewer than 20 embedded characters is rasterized and handed to
+   **Tesseract first**. Printed scans are the case TrOCR is slowest and worst
+   at, and Tesseract reads them in milliseconds.
+3. Only a page Tesseract returns empty or garbled for goes to **TrOCR**, which
+   is the handwriting model. Those chunks are tagged
+   `content_type: "handwritten_ocr"`.
 
 ---
 
-## Why TrOCR, and what was removed
+## Why TrOCR, and what Tesseract is for
 
-- **Tesseract** was never installed or imported here. It is not in
-  `requirements.txt`.
+- **TrOCR `microsoft/trocr-base-handwritten` is the handwriting model**, and the
+  only one used for it. On the repository's synthetic sample its CER and WER
+  matched the small model, with no measurable disadvantage, so the base model is
+  the default and `trocr-small` is not offered as a shortcut. This does not
+  establish how either model performs on real handwriting.
+- **Tesseract is used, but only as a fast reader for printed scans.** Every
+  rasterized page is offered to it first, and a page whose output comes back
+  empty or mostly non-letter falls through to TrOCR - which is exactly what
+  happens to handwriting, so handwritten pages are still recognised by TrOCR and
+  still scored by it. The cost of that ordering is one extra Tesseract call per
+  scanned page; the saving on a printed scan is far larger (measured below).
+  `pytesseract` is in `requirements.txt`; the `tesseract-ocr` **binary is a
+  separate install** (Windows: `winget install UB-Mannheim.TesseractOCR`).
+  Without the binary, uploads still succeed - each printed page logs a warning
+  and takes the slower TrOCR path.
 - **Docling** was removed. It is a general document converter, and its layout
   machinery is dead weight once per-page handwriting recognition is the actual
   requirement. It was also the heaviest dependency in the project.
-- **TrOCR `microsoft/trocr-base-handwritten`** remains the default. On the
-  repository's synthetic sample, its CER and WER matched the small model; this
-  larger model had no measurable disadvantage on that test. This does not
-  establish how either model performs on real handwriting. Set
-  `HTR_MODEL=microsoft/trocr-small-handwritten` as a CPU speed option; its real-
-  handwriting accuracy has not been measured here. OpenCV handles geometry
-  (deskew and line segmentation) so TrOCR receives one clean line at a time.
 
-grey levels the recogniser relies on. Each line is then trimmed horizontally to
 Line boundaries are found on the binarized mask, but the crops themselves are
 taken from the grayscale image: thresholding throws away the stroke weight and
 grey levels the recogniser relies on. Each line is then trimmed horizontally to
 its own ink, avoiding unnecessary blank space around the text.
+
+`fastNlMeansDenoising` is switched off by default (`DENOISE_IMAGES=false`). It
+costs a full extra pass over every page image, and on these scans the deskew and
+ink-trimmed line crops do the work it was meant to help with. Switching it on
+does not remove either step.
 
 ---
 
@@ -60,15 +81,28 @@ its own ink, avoiding unnecessary blank space around the text.
 
 - Python 3.12
 - [Ollama](https://ollama.com) running locally, with the answer model pulled
+- The `tesseract-ocr` binary for the fast printed-scan path (optional - see above)
 - Internet access **once**, on the first run, for the Hugging Face models
 
+Everything here runs on CPU. There is no CUDA path in the code, and no GPU is
+assumed anywhere in the timings below.
+
 ```bash
-ollama pull qwen2.5:1.5b
+ollama pull qwen2.5:3b
 ```
 
 The application never lets Ollama fetch a model on demand. If the configured
 model is not already pulled, requests fail with a message naming the model and
-the `ollama pull` command to run.
+the `ollama pull` command to run. A different model that happens to share its
+name prefix is not accepted as a substitute; `qwen2.5:3b` and `qwen2.5:3b:latest`
+are the same model to this check.
+
+On Windows, install the Tesseract binary separately - the pip package is only a
+wrapper that calls it:
+
+```powershell
+winget install UB-Mannheim.TesseractOCR
+```
 
 ## Install and run
 
@@ -122,14 +156,17 @@ python tools/evaluate_handwriting.py
 | `DELETE` | `/documents/{name}` | Remove a file from both the chunk store and the vector index |
 
 Accepted extensions: `.pdf .txt .md .docx .png .jpg .jpeg`. Maximum upload size
-is 50 MB, enforced while streaming to disk, so an oversized file is rejected
+is 100 MB, enforced while streaming to disk, so an oversized file is rejected
 before it has been fully read.
 
-A `/chat` response contains `answer`, `document_name`, and its retrieved
-`sources`. A refusal also includes `refusal_reason`: `no_evidence`,
-`low_handwriting_confidence`, `untraceable_citation`, `unsupported_claim`, or
-`not_answerable`, so a refusal says which guard stopped the answer rather than
-leaving the reading of it to guesswork.
+A `/chat` response contains `answer`, `document_name`, and `sources`. `sources`
+is exactly the set of excerpts the answer was built from, in `[S1]..[Sn]` order:
+`[S2]` in the answer text resolves to `sources[1]`, and no excerpt that the
+answer stage rejected appears in it. That is why the UI can turn every label
+into a link. A refusal returns `sources: []` and carries `refusal_reason`:
+`no_evidence`, `low_handwriting_confidence`, `untraceable_citation`,
+`unsupported_claim`, or `not_answerable`, so a refusal says which guard stopped
+the answer rather than leaving the reading of it to guesswork.
 
 ---
 
@@ -173,17 +210,36 @@ Seven independent measures, each covered by a test:
 4. **Citations must resolve.** A label pointing outside the supplied excerpts
    (`[S4]` when two excerpts exist) is a fabricated reference, so the answer is
    refused instead of being shown with a dead link. Outside the single-excerpt
-   case above, the system never writes a label on the model's behalf.
+   case below, the system never writes a label on the model's behalf. The one
+   exception: when exactly one excerpt was supplied and the model numbered it
+   wrong (`[S2]` against a single excerpt), the label is renumbered rather than
+   refused - it cannot be naming evidence that was never shown, so there is
+   nothing new to misattribute, and the verifier still has to approve the claim.
+   A run of labels the model wrote side by side (`. [S1] [S2]`) collapses to the
+   one chip that excerpt has. Refusing a correct answer over a label typo was
+   measured as a real false negative on this machine, and the user reads it as
+   the system never answering.
 5. **Independent verifier.** A second pass checks that each claim is stated in
-   the excerpts *and* that the draft answers the question asked. It fails
-   closed: any error in the verifier means no answer.
-6. **OCR confidence gate.** An excerpt is only shown to the model, and can only
-   be cited, when it is digital text or handwriting at or above
-   `HTR_MIN_CONFIDENCE`. Garbled handwriting is removed from the evidence
-   rather than merely flagged, so a low-confidence line cannot be quoted as an
-   answer; if nothing trustworthy remains, the system refuses.
+   the excerpts *and* that the draft answers the question asked. The drafting
+   prompt asks for exactly that too - only what the question asks, no supported
+   but unrelated background - because a real run padded a correct "200 litres"
+   answer with the survey's village count and the verifier refused the whole
+   thing. It fails closed: any error in the verifier means no answer.
+6. **OCR confidence gate.** Each handwritten chunk carries the *minimum*
+   confidence of the lines inside it, not the page average, so one unreadable
+   line lowers only the chunk it landed in and cannot drag a clean chunk down
+   with it. An excerpt is only shown to the model, and can only be cited, when
+   it is digital text or handwriting at or above `HTR_MIN_CONFIDENCE`. Garbled
+   handwriting is removed from the evidence rather than merely flagged, so a
+   low-confidence line cannot be quoted as an answer; if nothing trustworthy
+   remains, the system refuses.
 7. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
    commands.
+
+In the UI, every `[Sn]` label in a successful answer is rendered as a chip that
+opens and highlights the matching source card. Labels are only turned into chips
+when a source with that number exists, and a refusal renders none - so there is
+no path where the page shows a citation that points at nothing.
 
 When the evidence is insufficient the answer is exactly:
 
@@ -200,22 +256,23 @@ pytest -m slow
 pytest tests/test_retrieval.py -k leak
 ```
 
-Five modules: `test_handwriting.py`, `test_processor.py`, `test_retrieval.py`,
-`test_llm.py`, `test_api.py`. The one skip is
+Six modules: `test_handwriting.py`, `test_processor.py`, `test_retrieval.py`,
+`test_llm.py`, `test_api.py`, `test_storage.py`. The one skip is
 `test_recognition_on_a_real_handwritten_sample`, which stays skipped until a real
 page is added (see below).
 
 Measured in this run:
 
 ```
-96 passed, 1 skipped           (pytest -q)
-1 passed, 1 skipped, 95 deselected (pytest -m slow -q)
-1 passed, 12 deselected       (pytest tests/test_retrieval.py -k leak -q)
+143 passed, 1 skipped                      (pytest -q)
+1 passed, 1 skipped, 142 deselected        (pytest -m slow -q)
+1 passed, 12 deselected                    (pytest tests/test_retrieval.py -k leak -q)
 ```
 
 `tools/live_check.py` runs the same guarantees against a **real** running
-backend, Ollama and TrOCR rather than mocks - upload, recognition, cited answer,
-refusal, isolation, delete, re-upload, corrupt file, invalid file:
+backend, Ollama and TrOCR rather than mocks - upload, recognition, every `[Sn]`
+label in an answer resolving to a returned source, refusal carrying no sources,
+isolation, delete, re-upload, corrupt file, invalid file:
 
 ```bash
 uvicorn backend.main:app --port 8000
@@ -268,24 +325,33 @@ pytest -m slow
 
 ### Speed
 
-Same machine, CPU only:
+Same machine, CPU only, warm caches unless stated otherwise:
 
 | Operation | Time |
 |-----------|------|
-| Extract generated 20-page digital PDF | 0.187 s |
-| Warm full upload of generated PDF (160 chunks; chunk + embed) | 0.954 s |
-| Full upload in a fresh process (model load + indexing) | 7.562 s |
-| Warm OCR of the 5-line synthetic image with base TrOCR | 8.766 s |
+| Extract generated 20-page digital PDF | 0.017 s |
+| Warm full upload of that PDF (chunk + embed + index) | 2.484 s |
+| Warm upload of the shipped handwritten sample PDF (1 scanned page, 1 text page) | 0.666 s |
+| First TrOCR upload in a fresh process (includes loading the 1.3 GB weights) | 23.2 s |
+| Upload of a generated 2-page **printed** scan, Tesseract fast path | 1.703 s |
+| The same file with the fast path switched off, so TrOCR reads it | 391.5 s |
 
-The digital timing fixture is generated and contains no OCR pages. The cold
-measurement includes backend imports and loading the cached embedding model;
-the subprocess wall time was 12.952 s. All handwriting accuracy values above
-are synthetic; accuracy on real handwriting remains unmeasured.
+The last two rows are why the routing order is what it is: a printed page costs
+TrOCR about three minutes and Tesseract under a second. A 40-page printed scan
+left on the TrOCR path would run for hours, which is also the reason
+`PDF_MAX_OCR_PAGES` (default 40) exists - a scan that large fails at once with a
+message naming the page count and telling you to split the file, instead of
+appearing to hang. `OCR_PAGES_AT_A_TIME` (default 2) caps how many pages are
+rasterized and recognised at once, which is what keeps a big scan inside laptop
+RAM.
 
-A digital PDF never touches the recogniser, which is what keeps ordinary uploads
-fast. Scanned pages cost what CPU inference costs, and `PDF_MAX_OCR_PAGES`
-(default 50) makes a very large scan fail with an explanation instead of
-appearing to hang.
+A handwritten page pays for one wasted Tesseract attempt before TrOCR reads it,
+and the tables above show that is cheap: the handwritten sample PDF uploads in
+0.666 s with both engines on that page.
+
+The digital and printed timing fixtures are generated by this run and contain no
+real person's documents. All handwriting accuracy values are synthetic; accuracy
+on real handwriting remains unmeasured.
 
 ---
 
@@ -314,7 +380,7 @@ tools/
   make_handwritten_sample.py     regenerate the synthetic page, PDF and ground truth
   evaluate_handwriting.py        CER, WER and confidence for any sample
   live_check.py                  end-to-end run against a real backend and Ollama
-tests/                           five modules, one per pipeline concern
+tests/                           six modules, one per pipeline concern
 sample_docs/                     digital and handwritten fixtures
   real_handwritten/              empty until a genuine human page is added
 ```
@@ -327,6 +393,10 @@ sample_docs/                     digital and handwritten fixtures
   columns, or on a slanted baseline, degrades it.
 - Recognition runs on CPU in this configuration, so a many-page scan is slow. A
   GPU would change the timings, not the design.
+- The printed-scan fast path depends on the `tesseract-ocr` binary being
+  installed; it is an external program, not a pip package. Without it every
+  printed page takes the TrOCR path, which is correct but several times slower,
+  and the backend logs a warning per page rather than failing the upload.
 - Every accuracy figure above is **synthetic**. No real human handwriting has
   been measured, so no real-world accuracy is claimed.
 - The answer verifier is the same local model as the generator. It is a

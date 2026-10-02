@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from backend import handwriting, imaging
+from backend.config import settings
 
 
 def drawn_page(lines=5, skew=0.0, size=(700, 900)):
@@ -251,3 +252,104 @@ def test_recognition_on_a_real_handwritten_sample():
     assert 0.0 <= cer <= 1.0
     assert 0.0 <= wer <= 1.0
     assert 0.0 < confidence <= 1.0
+
+
+def test_denoising_is_off_by_default(monkeypatch):
+    """fastNlMeansDenoising is several seconds per page and does not buy
+    accuracy on these scans, so the default path must not call it."""
+    calls = []
+    monkeypatch.setattr(
+        imaging, "denoise", lambda gray: calls.append(gray) or gray
+    )
+    monkeypatch.setattr(settings, "denoise_images", False)
+
+    imaging.preprocess_image(np.full((200, 200), 255, dtype=np.uint8))
+
+    assert calls == []
+
+
+def test_denoising_runs_only_when_it_is_switched_on(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        imaging, "denoise", lambda gray: calls.append(gray) or gray
+    )
+    monkeypatch.setattr(settings, "denoise_images", True)
+
+    imaging.preprocess_image(np.full((200, 200), 255, dtype=np.uint8))
+
+    assert len(calls) == 1, "the switch has to actually reach the pipeline"
+
+
+def test_deskew_and_line_crops_survive_the_denoise_switch(monkeypatch):
+    """Turning denoising off must not quietly drop the steps that were earned."""
+    monkeypatch.setattr(settings, "denoise_images", False)
+
+    crops, angle = imaging.preprocess_image(drawn_page(lines=4, skew=2.5))
+
+    assert len(crops) == 4
+    assert abs(angle) > 0.5
+    assert all(crop.ndim == 2 and crop.size for crop in crops)
+
+
+def test_lines_are_recognised_in_batches_of_four(monkeypatch):
+    """Ten lines must reach the model as 4 + 4 + 2, not one call per line and
+    not one giant batch that exhausts memory on CPU."""
+    import torch
+
+    seen = []
+
+    class Tokenizer:
+        pad_token_id = 0
+        eos_token_id = 1
+
+        def batch_decode(self, sequences, skip_special_tokens=True):
+            return ["a recognised line"] * int(sequences.shape[0])
+
+    class Processor:
+        tokenizer = Tokenizer()
+
+        def __call__(self, images, return_tensors=None, padding=None):
+            seen.append(len(images))
+            count = len(images)
+
+            class Inputs:
+                pixel_values = torch.zeros((count, 3, 8, 8))
+
+            return Inputs()
+
+    class Model:
+        def generate(self, pixel_values, **kwargs):
+            count = int(pixel_values.shape[0])
+
+            class Output:
+                sequences = torch.tensor([[1, 2]] * count)
+                scores = [torch.zeros((count, 4))]
+
+            return Output()
+
+    monkeypatch.setattr(handwriting, "_model_and_processor", lambda: (Model(), Processor()))
+
+    crops = [np.full((20, 120), 200, dtype=np.uint8) for _ in range(10)]
+    results = handwriting.recognize_lines(crops)
+
+    assert settings.trocr_line_batch == 4
+    assert seen == [4, 4, 2]
+    assert len(results) == 10
+
+
+def test_recognize_page_lines_returns_every_line_with_its_confidence(monkeypatch):
+    """The chunker needs per-line scores to give a chunk the worst line it
+    holds; a page-level mean alone cannot tell it which chunk is unsafe."""
+    monkeypatch.setattr(
+        imaging, "preprocess_image",
+        lambda image: ([np.zeros((10, 40), dtype=np.uint8)] * 2, 0.0),
+    )
+    monkeypatch.setattr(
+        handwriting, "recognize_lines",
+        lambda crops: [("First line.", 0.91), ("Second line.", 0.44)],
+    )
+
+    lines = handwriting.recognize_page_lines(np.zeros((50, 50), dtype=np.uint8))
+
+    assert lines == [("First line.", 0.91), ("Second line.", 0.44)]
+    assert handwriting.mean_confidence(lines) == pytest.approx(0.675)

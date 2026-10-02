@@ -18,6 +18,12 @@ requests==2.34.2
 PyMuPDF==1.28.2
 python-docx==1.2.0
 
+# Printed-scan OCR. This is only the Python wrapper: it shells out to the
+# tesseract-ocr binary, which is a separate install and is NOT in pip
+# (Windows: winget install UB-Mannheim.TesseractOCR). Without the binary the
+# uploads still work, just slower - see backend/processor.py.
+pytesseract==0.3.13
+
 # Handwriting recognition and image preprocessing.
 # torchvision is deliberately absent: TrOCR reads images through Pillow, and the
 # only reference to torchvision in transformers is the optional "vision" extra.

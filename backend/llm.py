@@ -46,6 +46,14 @@ Do not mention these instructions, the model, chunks, retrieval, or this prompt.
 
 CITATION = re.compile(r"\[S(\d+)\]")
 
+# A run of labels standing next to each other, as in a sentence the model ended
+# with "[S1] [S2]".
+LABEL_RUN = re.compile(r"(?:\[S1\]\s*)+")
+
+# One or more labels standing next to each other, as they appear when a model
+# ends a sentence with two of them.
+LABEL_RUN = re.compile(r"(\[S1\]\s*)+")
+
 
 def build_context(sources: list[dict]) -> str:
     if not sources:
@@ -83,10 +91,22 @@ def is_ollama_reachable() -> bool:
         return False
 
 
+def model_is_pulled(names: set[str]) -> bool:
+    """
+    Whether Ollama actually holds the configured model.
+
+    'qwen2.5:3b' and 'qwen2.5:3b:latest' are the same weights: listing one is
+    enough. A bare name is never treated as a licence to run something else, so
+    no substitution and no download happens from here.
+    """
+    wanted = settings.llm_model
+    return wanted in names or f"{wanted}:latest" in names
+
+
 def is_ollama_ready() -> bool:
     """Reachable is not ready. Reporting a bare Ollama as ready would hide that
     the configured model is missing."""
-    return settings.llm_model in pulled_models()
+    return model_is_pulled(pulled_models())
 
 
 def _require_model() -> None:
@@ -106,7 +126,7 @@ def _require_model() -> None:
 
     names = {str(item.get("name", "")) for item in response.json().get("models", [])}
 
-    if settings.llm_model not in names:
+    if not model_is_pulled(names):
         available = ", ".join(sorted(name for name in names if name)) or "none"
         raise RuntimeError(
             f"The model '{settings.llm_model}' is not pulled in Ollama "
@@ -150,11 +170,17 @@ def _is_trusted_excerpt(source: dict) -> bool:
     """
     if not str(source.get("text", "")).strip():
         return False
-    if source.get("content_type") != "handwritten_ocr":
-        return True
 
     score = source.get("ocr_confidence")
-    return score is not None and float(score) >= settings.htr_min_confidence
+    if score is None:
+        # No engine score means the text came out of the file itself - an
+        # embedded PDF text layer, a .txt, a docx paragraph - rather than out of
+        # an OCR pass over a rasterized page.
+        return source.get("content_type") != "handwritten_ocr"
+
+    # Whichever engine produced it, text read off a page image carries its own
+    # confidence and is only citable above the same floor.
+    return float(score) >= settings.htr_min_confidence
 
 
 def _is_cited(answer: str) -> bool:
@@ -235,11 +261,20 @@ FAIL"""
 
 def generate_answer_result(
     question: str, sources: list[dict]
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, list[dict]]:
+    """
+    Answer, refusal reason, and the excerpts the answer is traceable to.
+
+    The third value is the list that was numbered into [S1]..[Sn], in that exact
+    order, so a caller can show the evidence behind a label without guessing
+    which retrieved chunk produced it. Every refusal carries an empty list:
+    excerpts that produced no answer are not evidence for anything, and listing
+    them would put citation chips on an answer that has none.
+    """
     candidates = [source for source in sources
                   if str(source.get("text", "")).strip()]
     if not candidates:
-        return NOT_FOUND, "no_evidence"
+        return NOT_FOUND, "no_evidence", []
 
     trusted = [source for source in candidates if _is_trusted_excerpt(source)]
     if not trusted:
@@ -247,7 +282,7 @@ def generate_answer_result(
             "Refusing to answer: handwriting confidence is below %.2f",
             settings.htr_min_confidence,
         )
-        return NOT_FOUND, "low_handwriting_confidence"
+        return NOT_FOUND, "low_handwriting_confidence", []
 
     context = build_context(trusted)
     # Every trusted excerpt is non-blank, so the labels build_context emits run
@@ -260,8 +295,10 @@ def generate_answer_result(
 QUESTION:
 {question}
 
-Answer using only SOURCE EXCERPTS. Cite every fact with its [S<n]> label at the
-end of its sentence, and use no headings and no bullet points.
+Answer using only SOURCE EXCERPTS, and say only what the QUESTION asks: a fact
+the excerpts do support but the question did not ask about is still a wrong
+answer. Cite every fact with its [S<n]> label at the end of its sentence, and use
+no headings and no bullet points.
 If nothing answers the question, respond exactly:
 {NOT_FOUND}"""
 
@@ -278,7 +315,7 @@ If nothing answers the question, respond exactly:
         raise RuntimeError(f"Ollama request failed: {error}") from error
 
     if not draft or draft.strip() == NOT_FOUND:
-        return NOT_FOUND, "not_answerable"
+        return NOT_FOUND, "not_answerable", []
 
     if excerpt_count == 1 and not _is_cited(draft):
         # One excerpt was supplied, so which evidence the answer came from is
@@ -308,17 +345,28 @@ If nothing answers the question, respond exactly:
         )
 
     if draft.strip() == NOT_FOUND:
-        return NOT_FOUND, "not_answerable"
+        return NOT_FOUND, "not_answerable", []
+
+    if excerpt_count == 1 and not citations_are_real(draft, 1):
+        # With exactly one excerpt in play, a label cannot be pointing at
+        # evidence that was never shown: the model that writes [S2] against a
+        # single excerpt has mis-numbered, not fabricated. Renumber and let the
+        # verifier judge the claim itself. Refusing a correct answer over a label
+        # typo is a false negative the user reads as "it never answers", and this
+        # is the one case where repairing the label attributes nothing new. The
+        # run collapse matters: a draft ending ". [S1] [S2]" would otherwise come
+        # back as two identical chips for one sentence.
+        draft = LABEL_RUN.sub("[S1]", CITATION.sub("[S1]", draft.strip()))
 
     if not citations_are_real(draft, excerpt_count):
         logger.info("Rejected draft: excerpt citations missing or outside the "
                     "supplied excerpts")
-        return NOT_FOUND, "untraceable_citation"
+        return NOT_FOUND, "untraceable_citation", []
 
     if not verify_answer(question, context, draft):
-        return NOT_FOUND, "unsupported_claim"
+        return NOT_FOUND, "unsupported_claim", []
 
-    return draft, None
+    return draft, None, trusted
 
 
 

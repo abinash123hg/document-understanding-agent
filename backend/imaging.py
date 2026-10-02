@@ -11,6 +11,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from backend.config import settings
+
 logger = logging.getLogger(__name__)
 
 MIN_LINE_HEIGHT = 8
@@ -162,7 +164,12 @@ def segment_lines(gray: np.ndarray) -> list[np.ndarray]:
 
 
 def preprocess_image(image: np.ndarray) -> tuple[list[np.ndarray], float]:
-    gray = denoise(to_gray(image))
+    gray = to_gray(image)
+    # fastNlMeansDenoising costs several seconds per page and measurably changes
+    # nothing on these scans, so deskew and line segmentation carry the default
+    # path and denoising is opt-in.
+    if settings.denoise_images:
+        gray = denoise(gray)
     gray, angle = deskew(gray)
     return segment_lines(gray), angle
 

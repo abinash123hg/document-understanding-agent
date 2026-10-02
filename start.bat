@@ -34,12 +34,12 @@ set "PY=.venv\Scripts\python.exe"
 
 REM ---------- 2. Installed packages --------------------------------
 echo [CHECK]  Verifying installed packages ...
-%PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
+%PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers','pytesseract']]" >nul 2>&1
 if errorlevel 1 (
     echo [SETUP]  Missing packages found. Installing requirements ...
     echo          Needs internet. One time only.
     %PY% -m pip install -r requirements.txt
-    %PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers']]" >nul 2>&1
+    %PY% -c "import importlib.metadata as m; [m.version(p) for p in ['fastapi','uvicorn','python-multipart','pydantic','pydantic-settings','python-dotenv','requests','PyMuPDF','python-docx','torch','transformers','sentencepiece','opencv-python-headless','Pillow','numpy','chromadb','rank-bm25','sentence-transformers','pytesseract']]" >nul 2>&1
     if errorlevel 1 (
         echo.
         echo [ERROR] Installation did not finish correctly.
@@ -58,9 +58,19 @@ curl -s -o nul -m 3 http://127.0.0.1:11434/api/tags
 if errorlevel 1 (
     echo [WARN]   Ollama is not running - chat answers will not work.
     echo          Start it with:   ollama serve
-    echo          Then pull once:  ollama pull qwen2.5:1.5b
+    echo          Then pull once:  ollama pull qwen2.5:3b
 ) else (
     echo [OK]     Ollama is running.
+)
+
+REM ---------- 3b. Tesseract binary (optional, makes scans faster) ----
+where tesseract >nul 2>&1
+if errorlevel 1 (
+    echo [WARN]   Tesseract binary not found. Handwritten pages still read,
+    echo          but printed scans go through TrOCR, which is much slower.
+    echo          Install it once:  winget install UB-Mannheim.TesseractOCR
+) else (
+    echo [OK]     Tesseract found - printed scans use the fast path.
 )
 echo.
 

@@ -18,8 +18,6 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 8
-
 
 class HandwritingModelError(RuntimeError):
     """Raised when the TrOCR weights cannot be loaded."""
@@ -125,9 +123,10 @@ def recognize_lines(crops: list[np.ndarray]) -> list[tuple[str, float]]:
     model, processor = _model_and_processor()
     tokenizer = processor.tokenizer
     results: list[tuple[str, float]] = []
+    batch_size = max(1, int(settings.trocr_line_batch))
 
-    for start in range(0, len(crops), BATCH_SIZE):
-        batch = [_to_pil(crop) for crop in crops[start:start + BATCH_SIZE]]
+    for start in range(0, len(crops), batch_size):
+        batch = [_to_pil(crop) for crop in crops[start:start + batch_size]]
         inputs = processor(images=batch, return_tensors="pt", padding=True)
 
         with torch.no_grad():
@@ -150,20 +149,29 @@ def recognize_lines(crops: list[np.ndarray]) -> list[tuple[str, float]]:
     return results
 
 
-def recognize_array(image: np.ndarray) -> tuple[str, float]:
-    """Preprocess an in-memory image and recognise it. Used for PDF pages."""
+def recognize_page_lines(image: np.ndarray) -> list[tuple[str, float]]:
+    """
+    Preprocess one page and recognise it line by line, keeping each confidence.
+
+    The per-line scores are what let the chunker give a chunk the worst line it
+    contains rather than an average a few clean lines can carry.
+    """
     from backend import imaging
 
     crops, angle = imaging.preprocess_image(image)
     lines = recognize_lines(crops)
-    text = _join_lines(lines)
-    confidence = mean_confidence(lines)
 
     logger.info(
         "Recognised %d lines, deskew %.2f deg, mean confidence %.3f",
-        len(crops), angle, confidence,
+        len(crops), angle, mean_confidence(lines),
     )
-    return text, confidence
+    return lines
+
+
+def recognize_array(image: np.ndarray) -> tuple[str, float]:
+    """Preprocess an in-memory image and recognise it. Used for PDF pages."""
+    lines = recognize_page_lines(image)
+    return _join_lines(lines), mean_confidence(lines)
 
 
 def recognize_image(path: Path) -> tuple[str, float]:
