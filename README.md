@@ -37,10 +37,15 @@ Routing is decided per page, not per file:
    has typed a header over it, and still gets read.
 2. A page with fewer than 20 embedded characters is rasterized and handed to
    **Tesseract first**. Printed scans are the case TrOCR is slowest and worst
-   at, and Tesseract reads them in milliseconds.
-3. Only a page Tesseract returns empty or garbled for goes to **TrOCR**, which
-   is the handwriting model. Those chunks are tagged
-   `content_type: "handwritten_ocr"`.
+   at, and Tesseract reads them in milliseconds. Its reading is kept only when
+   it is at least 20 characters, at least half letters, and carries a word-level
+   confidence score; anything else is treated as a failed attempt.
+3. Only a page whose Tesseract attempt failed goes to **TrOCR**, which is the
+   handwriting model. Those chunks are tagged `content_type: "handwritten_ocr"`.
+   Real human writing is what fails that attempt - the repository's own sample
+   is a cursive *font*, which Tesseract reads well, so that page is indexed as
+   `digital_text` from the fast path and never reaches TrOCR. Both outcomes are
+   exercised in `tools/live_check.py`.
 
 ---
 
@@ -53,10 +58,11 @@ Routing is decided per page, not per file:
   establish how either model performs on real handwriting.
 - **Tesseract is used, but only as a fast reader for printed scans.** Every
   rasterized page is offered to it first, and a page whose output comes back
-  empty or mostly non-letter falls through to TrOCR - which is exactly what
-  happens to handwriting, so handwritten pages are still recognised by TrOCR and
-  still scored by it. The cost of that ordering is one extra Tesseract call per
-  scanned page; the saving on a printed scan is far larger (measured below).
+  empty, too short, mostly non-letters, or without a confidence score falls
+  through to TrOCR - which is what happens to human handwriting, so handwritten
+  pages are still recognised by TrOCR and still scored by it. The cost of that
+  ordering is one extra Tesseract call per scanned page (measured at 0.98 s on a
+  five-line page); the saving on a printed scan is far larger (below).
   `pytesseract` is in `requirements.txt`; the `tesseract-ocr` **binary is a
   separate install** (Windows: `winget install UB-Mannheim.TesseractOCR`).
   Without the binary, uploads still succeed - each printed page logs a warning
@@ -112,8 +118,10 @@ Double-click `start.bat`. It checks the virtual environment and the installed
 packages first — anything already present is reused, anything missing is
 downloaded once — then opens two terminal windows (backend on
 `http://127.0.0.1:8000`, frontend on `http://localhost:5500`), waits for the
-backend to answer, and opens Microsoft Edge on the app. It also warns if
-Ollama is not running. Closing both windows stops the app.
+backend to answer, and opens Microsoft Edge on the app. It warns if Ollama is
+not running, and warns if the `tesseract-ocr` binary is missing (printed scans
+then take the slow TrOCR path - nothing fails). Closing both windows stops the
+app.
 
 ### Any platform: manual
 
@@ -283,6 +291,10 @@ MAX_UPLOAD_SIZE_MB=1 uvicorn backend.main:app --port 8001
 python tools/live_check.py --base http://127.0.0.1:8001 --oversize-file big.pdf
 ```
 
+Measured in this run against a real backend, real Ollama and real TrOCR: **32
+passed, 0 failed**, twice in a row, with the oversize check skipped on the
+default server because the sample does not exceed 100 MB.
+
 ### Recognition accuracy
 
 `sample_docs/handwritten_notes.png` is **synthetic** handwriting: five lines
@@ -331,23 +343,36 @@ Same machine, CPU only, warm caches unless stated otherwise:
 |-----------|------|
 | Extract generated 20-page digital PDF | 0.017 s |
 | Warm full upload of that PDF (chunk + embed + index) | 2.484 s |
-| Warm upload of the shipped handwritten sample PDF (1 scanned page, 1 text page) | 0.666 s |
-| First TrOCR upload in a fresh process (includes loading the 1.3 GB weights) | 23.2 s |
+| Warm upload of the shipped handwritten sample PDF (1 fast-path page, 1 text page) | 0.666 s |
 | Upload of a generated 2-page **printed** scan, Tesseract fast path | 1.703 s |
 | The same file with the fast path switched off, so TrOCR reads it | 391.5 s |
+| First TrOCR upload in a fresh process (includes loading the 1.3 GB weights) | 23.2 s |
+| One warm TrOCR pass over a 5-line page | 10.4 s |
+| The Tesseract attempt on that same page | 0.98 s |
 
-The last two rows are why the routing order is what it is: a printed page costs
-TrOCR about three minutes and Tesseract under a second. A 40-page printed scan
-left on the TrOCR path would run for hours, which is also the reason
-`PDF_MAX_OCR_PAGES` (default 40) exists - a scan that large fails at once with a
-message naming the page count and telling you to split the file, instead of
-appearing to hang. `OCR_PAGES_AT_A_TIME` (default 2) caps how many pages are
+What each kind of file costs, on this machine:
+
+| File | Pages recognised by | Page cap | Typical time |
+|------|---------------------|----------|--------------|
+| Digital PDF (text layer) | PyMuPDF, no OCR | no page cap, only the 100 MB upload limit | ~0.12 s/page |
+| Printed scan | Tesseract | 40 OCR pages per upload | ~0.85 s/page |
+| Handwritten scan or image | TrOCR | 40 OCR pages per upload | ~11 s/page warm, plus 23-32 s once for the weights |
+
+The two printed-scan rows are why the routing order is what it is: a printed
+page costs TrOCR about three minutes and Tesseract under a second. A 40-page
+printed scan left on the TrOCR path would run for hours, which is also the
+reason `PDF_MAX_OCR_PAGES` (default 40) exists - a scan that large fails at once
+with a message naming the page count and telling you to split the file, instead
+of appearing to hang. `OCR_PAGES_AT_A_TIME` (default 2) caps how many pages are
 rasterized and recognised at once, which is what keeps a big scan inside laptop
 RAM.
 
-A handwritten page pays for one wasted Tesseract attempt before TrOCR reads it,
-and the tables above show that is cheap: the handwritten sample PDF uploads in
-0.666 s with both engines on that page.
+The 10.4 s figure is one five-line page, and TrOCR cost scales with the lines it
+decodes, so a dense 25-line page is roughly five times that - arithmetic from
+the measured per-line rate, not a page that was timed. Note also that the
+0.666 s sample row is the **fast path**: that sample is a cursive font, so
+Tesseract claims it. A genuine human page pays the ~1 s failed attempt and then
+the TrOCR pass.
 
 The digital and printed timing fixtures are generated by this run and contain no
 real person's documents. All handwriting accuracy values are synthetic; accuracy
@@ -401,5 +426,17 @@ sample_docs/                     digital and handwritten fixtures
   been measured, so no real-world accuracy is claimed.
 - The answer verifier is the same local model as the generator. It is a
   fail-closed check, not a proof of correctness.
+- Because every guard fails closed, a correct answer can still be refused: the
+  verifier rejects a draft that pads itself with an unrelated fact, and a page
+  scored under `HTR_MIN_CONFIDENCE` is refused outright. Read a refusal as "go
+  look at that page", not as "this file contains no answer".
+- Text only. Diagrams, stamps, signatures, charts and the layout of a table
+  inside an image are invisible to this pipeline; a DOCX table survives only as
+  its flattened words.
+- One document per question, by design - there is no cross-document answer and
+  no collection-wide search mode.
+- A document that chunks down to a single chunk gets no BM25 candidates at all
+  (a corpus of one yields nothing to rank), so it rests on dense retrieval
+  alone.
 - DOCX tables are flattened during extraction, so cell alignment can be lost
   even when every value survives.
