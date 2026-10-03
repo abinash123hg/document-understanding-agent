@@ -410,7 +410,7 @@ QUESTION:
         return NOT_FOUND, "not_answerable", []
 
     # A copied context header is not an answer, and leaving it in would put the
-    # words "[S1 | ML Algorithms .pdf, page 5 | digital_text]" in front of the
+    # words "[S1 | notes.pdf, page 5 | digital_text]" in front of the
     # user where a citation chip should be.
     draft = EXCERPT_HEADER.sub("", draft).strip()
     if not draft:
