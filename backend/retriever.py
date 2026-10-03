@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 EMBED_MODEL = "all-MiniLM-L6-v2"
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 COLLECTION_NAME = "document_chunks"
-CANDIDATES = 12
 RRF_K = 60
 
 STOP_WORDS = {
@@ -46,6 +45,21 @@ def tokens(text: str) -> list[str]:
 @lru_cache(maxsize=1)
 def embedder():
     return SentenceTransformer(EMBED_MODEL)
+
+
+def candidate_pool(chunk_total: int) -> int:
+    """
+    How many fused chunks reach the reranker for one document.
+
+    A fixed pool is a coverage trap that scales backwards: 12 chunks are 8% of a
+    150-chunk report but 0.8% of a 1,500-chunk book, so past a certain size the
+    answer-bearing chunk stops entering the pool at all - and a chunk the
+    reranker never sees cannot be recovered by reranking.
+    """
+    return min(
+        max(settings.rerank_candidates, chunk_total // 20),
+        settings.rerank_candidates_max,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -208,13 +222,14 @@ def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> lis
 
     by_id = {str(chunk.get("id", "")): chunk for chunk in chunks}
 
+    candidates = candidate_pool(len(chunks))
     fused = reciprocal_rank_fusion([
-        _dense_ranking(query, document_name, min(CANDIDATES, len(chunks))),
-        _bm25_ranking(query, chunks, CANDIDATES),
+        _dense_ranking(query, document_name, min(candidates, len(chunks))),
+        _bm25_ranking(query, chunks, candidates),
     ])
 
     rows = []
-    for chunk_id, rrf_score in fused[:CANDIDATES]:
+    for chunk_id, rrf_score in fused[:candidates]:
         chunk = by_id.get(chunk_id)
         if chunk and str(chunk.get("text", "")).strip():
             rows.append(_row(chunk, document_name, rrf_score))
@@ -251,3 +266,39 @@ def retrieve(query: str, *, top_k: int = None, document_name: str = None) -> lis
 
     ranked.sort(key=lambda row: (row["rerank_score"], row["rrf_score"]), reverse=True)
     return ranked[:top_k]
+
+
+def document_overview(document_name: str, limit: int = None) -> list[dict]:
+    """
+    Evidence for a request about the document as a whole, in reading order.
+
+    Relevance ranking cannot serve this question: no chunk *is* the summary, so
+    every candidate scores near -10 against "summarize this document" and the
+    window fills with whichever slide happened to share a function word with the
+    request. Measured on a 13-page slide deck: the six chunks that came back for
+    that request were K-means centroids and a Naive Bayes table, and the model
+    was right to refuse them. What a document-level request needs is coverage, so
+    one chunk is taken from each equal slice of the document instead of ranking
+    the whole document against the request.
+    """
+    if not document_name:
+        return []
+
+    if limit is None:
+        limit = settings.overview_chunks
+
+    chunks = storage.get_chunks(document_name=document_name)
+    readable = [chunk for chunk in chunks if str(chunk.get("text", "")).strip()]
+    if not readable:
+        return []
+
+    readable.sort(key=lambda chunk: (int(chunk.get("page_number") or 0),
+                                     int(chunk.get("chunk_index") or 0)))
+
+    if limit >= len(readable):
+        picked = readable
+    else:
+        step = len(readable) / limit
+        picked = [readable[int(index * step)] for index in range(limit)]
+
+    return [_row(chunk, document_name, 0.0) for chunk in picked]

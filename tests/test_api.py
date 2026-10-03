@@ -183,7 +183,8 @@ def test_sources_returned_match_the_labels_the_model_used(client, monkeypatch):
     monkeypatch.setattr(retriever, "retrieve", lambda **kwargs: [unreadable, digital, handwritten])
 
     def fake_chat(messages, num_predict, timeout=180):
-        if messages[0]["content"].startswith("Return only PASS"):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
             return "PASS"
         return "Each household received a 200 litre tank. [S2]"
 
@@ -275,7 +276,8 @@ def test_source_text_is_capped_for_the_response(client, uploaded, monkeypatch):
     monkeypatch.setattr(retriever, "retrieve", lambda **kwargs: [long_excerpt])
 
     def fake_chat(messages, num_predict, timeout=180):
-        if messages[0]["content"].startswith("Return only PASS"):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
             return "PASS"
         return "The document describes this. [S1]"
 
@@ -286,6 +288,34 @@ def test_source_text_is_capped_for_the_response(client, uploaded, monkeypatch):
     ).json()
 
     assert len(body["sources"][0]["text"]) == 400
+
+
+def test_a_whole_document_request_is_served_coverage_not_ranking(client, uploaded, monkeypatch):
+    """The endpoint is where the two evidence windows split, so the choice itself
+    is the contract: a summary takes coverage, a fact question keeps relevance, and
+    the returned sources are whichever window the model was allowed to label."""
+    used = []
+    real_overview = retriever.document_overview
+    real_retrieve = retriever.retrieve
+
+    monkeypatch.setattr(retriever, "document_overview",
+                        lambda **kwargs: used.append("coverage") or real_overview(**kwargs))
+    monkeypatch.setattr(retriever, "retrieve",
+                        lambda **kwargs: used.append("ranking") or real_retrieve(**kwargs))
+    monkeypatch.setattr(llm, "generate_answer_result",
+                        lambda question, sources: ("Noted. [S1]", None, list(sources)))
+
+    summary = client.post(
+        "/chat", json={"question": "summarize this document", "document_name": DOC}
+    ).json()
+    fact = client.post(
+        "/chat", json={"question": "How many villages were surveyed?", "document_name": DOC}
+    ).json()
+
+    assert used == ["coverage", "ranking"]
+    assert summary["answer"] == "Noted. [S1]"
+    assert all(row["filename"] == DOC for row in summary["sources"])
+    assert fact["sources"], "the fact path still returns its own evidence"
 
 
 def test_cors_defaults_cover_every_origin_the_page_can_come_from():

@@ -198,11 +198,19 @@ def chat(request: ChatRequest):
 
     # Retrieval is scoped to the selected document and fails closed when no
     # document is selected, so an answer can never come from another file.
-    retrieved = retriever.retrieve(
-        query=question,
-        top_k=settings.top_k,
-        document_name=request.document_name,
-    )
+    if llm.is_document_request(question):
+        # A request about the document as a whole has no answer-bearing chunk, so
+        # ranking it against the request returns arbitrary slides. Coverage of the
+        # selected document is what this kind of request needs instead.
+        retrieved = retriever.document_overview(
+            document_name=request.document_name,
+        )
+    else:
+        retrieved = retriever.retrieve(
+            query=question,
+            top_k=settings.top_k,
+            document_name=request.document_name,
+        )
 
     try:
         answer, refusal_reason, trusted = llm.generate_answer_result(

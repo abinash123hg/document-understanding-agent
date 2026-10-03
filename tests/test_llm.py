@@ -37,7 +37,8 @@ def approve(monkeypatch, draft="The tank holds 200 litres. [S1]"):
 
     def fake_chat(messages, num_predict, timeout=180):
         calls.append(messages)
-        if messages[0]["content"].startswith("Return only PASS"):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
             return "PASS"
         return draft
 
@@ -210,6 +211,80 @@ def test_a_doubled_label_on_one_excerpt_becomes_one_chip(monkeypatch):
     assert trusted == [digital_chunk()]
 
 
+def test_a_copied_context_header_is_never_shown_as_an_answer(monkeypatch):
+    """
+    Measured on a real scanned slide deck: the 3b model opened its answer by
+    repeating the "[S1 | file, page, kind]" line build_context writes above an
+    excerpt. That shape belongs to the prompt, not to any document, so it is
+    stripped - and the claim still has to pass the verifier on its own words.
+    """
+    approve(monkeypatch,
+            draft="[S1 | notes.txt, page 3 | digital_text] The tank holds 200 litres. [S1]")
+
+    answer, reason, trusted = llm.generate_answer_result(
+        "How much water?", [digital_chunk()]
+    )
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1]"
+
+
+def test_a_draft_that_is_only_a_context_header_refuses(monkeypatch):
+    approve(monkeypatch, draft="[S1 | notes.txt, page 3 | digital_text]")
+
+    answer, reason, trusted = llm.generate_answer_result(
+        "How much water?", [digital_chunk()]
+    )
+
+    assert answer == llm.NOT_FOUND
+    assert reason == "not_answerable"
+    assert trusted == []
+
+
+def test_a_claim_carrying_page_layout_is_dropped_without_being_checked(monkeypatch):
+    """Measured on a scanned deck: "easy to implement |" and "Gini Index ||| or"
+    came back as answers, because a checker reading the same garbled page calls
+    the paste supported. A claim carrying a pipe or a line break is not a sentence
+    the model wrote, so it comes out before the verifier is asked - which also
+    saves a model pass for every sentence it drops."""
+    calls = approve(monkeypatch,
+                    draft="easy to implement | [S1] The tank holds 200 litres. [S1]")
+
+    answer, reason, _ = llm.generate_answer_result(
+        "How much water?", [digital_chunk()]
+    )
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1]" + llm.PARTIAL_NOTE
+    checks = [m for m in calls if m[0]["content"].startswith("Return only PASS")]
+    assert len(checks) == 1, "only the sentence the model wrote was put to the checker"
+
+
+def test_a_pasted_block_of_the_page_is_not_treated_as_an_answer(monkeypatch):
+    approve(monkeypatch, draft="1) Create multiple subsets\nof the training data [S1]")
+
+    answer, reason, sources = llm.generate_answer_result(
+        "What is bootstrapping?", [digital_chunk()]
+    )
+
+    assert answer == llm.NOT_FOUND
+    assert reason == "unsupported_claim"
+    assert sources == []
+
+
+def test_a_formula_is_not_mistaken_for_pasted_layout(monkeypatch):
+    """The guard reads page furniture, not mathematics: "y = b0 + b1x" is a real
+    answer the document states, and refusing it would be a false negative."""
+    approve(monkeypatch, draft="The formula is y = b0 + b1x [S1]")
+
+    answer, reason, _ = llm.generate_answer_result(
+        "What is the formula?", [digital_chunk()]
+    )
+
+    assert reason is None
+    assert answer == "The formula is y = b0 + b1x [S1]"
+
+
 def test_confident_handwriting_is_still_shown_alongside_digital_text():
     sources = [
         digital_chunk("The tank holds 200 litres."),
@@ -246,7 +321,7 @@ def test_single_unlabeled_answer_takes_its_label_from_the_only_excerpt(monkeypat
     assert answer == "The tank holds 200 litres. [S1]"
     assert reason is None
     assert trusted == [excerpt], "the one excerpt is the one the label points at"
-    assert len(calls) == 2, "one draft plus one verification, no correction retry"
+    assert len(calls) == 2, "one draft, one claim check"
     assert not any("THIS ANSWER CANNOT BE USED AS-IS" in str(message)
                    for message in calls)
 
@@ -257,7 +332,8 @@ def test_uncited_draft_gets_one_retry_then_still_needs_a_citation(monkeypatch):
 
     def fake_chat(messages, num_predict, timeout=180):
         calls.append(messages[1]["content"])
-        if messages[0]["content"].startswith("Return only PASS"):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
             return "PASS"
         # First draft omits the label, the retry supplies it.
         return "The tank holds 200 litres." if len(calls) == 1 else "The tank holds 200 litres. [S1]"
@@ -427,13 +503,286 @@ def test_exact_refusal_draft_short_circuits(monkeypatch):
     assert len(calls) == 1, "a refusal must not be sent through the verifier"
 
 
-def test_verifier_failure_is_fail_closed(monkeypatch):
+def test_the_claim_check_is_fail_closed(monkeypatch):
+    """An unchecked claim is not a supported claim."""
     def boom(messages, num_predict, timeout=180):
         raise requests.exceptions.ConnectionError("ollama down")
 
     monkeypatch.setattr(llm, "ollama_chat", boom)
 
-    assert llm.verify_answer("q", "context", "draft") is False
+    assert llm.verify_claim("q", "context", "The tank holds 200 litres. [S1]") is False
+
+
+def test_a_check_that_errors_drops_only_its_own_claim(monkeypatch):
+    """One claim whose verification call blows up must not take a supported
+    neighbour down with it - the answer shrinks, it does not vanish."""
+    excerpt = digital_chunk("The tank holds 200 litres.")
+    other = digital_chunk("Six households joined in June.", chunk_index=1)
+
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            claim = messages[1]["content"].split("CLAIM TO CHECK:")[-1]
+            if "200 litres" in claim:
+                raise requests.exceptions.ConnectionError("ollama down")
+            return "PASS"
+        return "The tank holds 200 litres. [S1] Six households joined in June. [S2]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, trusted = llm.generate_answer_result("Capacity?", [excerpt, other])
+
+    assert reason is None
+    assert answer == "Six households joined in June. [S2]" + llm.PARTIAL_NOTE
+    assert "200 litres" not in answer
+
+
+def test_a_label_marks_the_end_of_the_claim_before_it():
+    assert llm.split_claims(
+        "The tank holds 200 litres. [S1] Six households joined. [S2]"
+    ) == [
+        "The tank holds 200 litres. [S1]",
+        "Six households joined. [S2]",
+    ]
+    # A sentence with no label of its own belongs to no evidence, so it is not a
+    # claim the verifier could ever ground.
+    assert llm.split_claims("The tank holds 200 litres. [S1] and more later") == [
+        "The tank holds 200 litres. [S1]"
+    ]
+
+
+def test_an_unsupported_claim_is_dropped_and_the_supported_one_is_kept(monkeypatch):
+    """The whole point of per-claim checking: a draft that is half right used to
+    be refused whole, and a draft that is half wrong used to be accepted whole."""
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            claim = messages[1]["content"].split("CLAIM TO CHECK:")[-1]
+            return "FAIL" if "June" in claim else "PASS"
+        return "The tank holds 200 litres. [S1] Six households joined in June. [S2]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    sources = [
+        digital_chunk("The tank holds 200 litres."),
+        digital_chunk(
+            "Six households joined in June.",
+            content_type="handwritten_ocr", ocr_confidence=0.80, chunk_index=1,
+        ),
+    ]
+
+    answer, reason, trusted = llm.generate_answer_result("Capacity?", sources)
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1]" + llm.PARTIAL_NOTE
+    assert "June" not in answer, "a claim the excerpts do not carry must not be shown"
+
+
+def test_a_partially_answered_question_says_so(monkeypatch):
+    """A shortened answer that reads like a complete one is worse than a refusal:
+    the reader cannot tell the document was cut off."""
+    checked = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            checked.append(messages[1]["content"])
+            return "PASS" if len(checked) == 1 else "FAIL"
+        return "The tank holds 200 litres. [S1] It was filled in May. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, _ = llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1]" + llm.PARTIAL_NOTE
+
+
+def test_a_full_answer_carries_no_uncertainty_note(monkeypatch):
+    approve(monkeypatch, draft="The tank holds 200 litres. [S1]")
+
+    answer, reason, _ = llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1]", \
+        "the note is for dropped claims, and a complete answer must not hedge"
+
+
+def test_the_checker_is_shown_the_evidence_and_told_a_label_is_not_evidence(monkeypatch):
+    """Two things the per-claim prompt has to get right: the excerpts must be in
+    front of the judge (a claim checked against nothing is a rubber stamp), and it
+    must be told that "[S1]" proves only which excerpt was shown - otherwise a
+    citation reads as its own support and every labelled claim passes."""
+    seen = []
+    budgets = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            seen.append(messages[1]["content"])
+            budgets.append(num_predict)
+            return "PASS"
+        return "The tank holds 200 litres. [S1] Six households joined in June. [S1]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert len(seen) == 2, "every claim is judged on its own pass"
+    assert all("notes.txt, page 3 | digital_text" in prompt for prompt in seen), \
+        "the checker must see the evidence, not the claim alone"
+    assert all("it is not evidence by itself" in prompt for prompt in seen)
+    assert all("General knowledge is not evidence" in prompt for prompt in seen)
+    assert all(budget <= 4 for budget in budgets), \
+        "a one-word verdict must not be given room to wander into a second answer"
+
+
+def test_the_claim_cap_drops_what_it_never_checked(monkeypatch):
+    """max_claims_per_answer is a CPU budget. Claims beyond it go unverified, so
+    they must leave the answer rather than ride in on their neighbour's PASS."""
+    checked = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            checked.append(messages[1]["content"].split("CLAIM TO CHECK:")[-1])
+            return "PASS"
+        return " ".join(
+            f"Fact number {n} holds. [S1]" for n in range(1, settings.max_claims_per_answer + 3)
+        )
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, _ = llm.generate_answer_result("Capacity?", [digital_chunk()])
+
+    assert reason is None
+    assert len(checked) == settings.max_claims_per_answer
+    assert "Fact number 1" in answer
+    assert f"Fact number {settings.max_claims_per_answer + 1}" not in answer
+    assert llm.PARTIAL_NOTE in answer, "unverified tail must be flagged, not hidden"
+
+
+def test_a_grounded_answer_is_not_second_guessed_on_topic(monkeypatch):
+    """There is no LLM gate asking whether the answer responds to the question.
+    Measured on a real scanned deck it said NO to ten correct one-line answers -
+    "the optimal boundary is the hyperplane [S1]" for a question about that
+    boundary was refused as off-topic - and a refused correct answer is invisible
+    to the reader while an extra sentence the document really contains is not.
+    What may be said is still decided one claim at a time against the excerpts."""
+    approve(monkeypatch, draft="The tank holds 200 litres. [S1] Six households joined. [S1]")
+
+    answer, reason, _ = llm.generate_answer_result("Who joined?", [digital_chunk()])
+
+    assert reason is None
+    assert answer == "The tank holds 200 litres. [S1] Six households joined. [S1]"
+    assert llm.PARTIAL_NOTE not in answer
+
+
+def test_a_whole_document_request_is_recognised_as_one():
+    assert llm.is_document_request("summarize this document")
+    assert llm.is_document_request("Please SUMMARISE the PDF in simple words")
+    assert llm.is_document_request("what is this document about?")
+    assert llm.is_document_request("give me an overview")
+    assert not llm.is_document_request("In an SVM, what is the optimal boundary called?")
+    assert not llm.is_document_request("How many litres does each tank hold?")
+    assert not llm.is_document_request("")
+
+
+def _draft_capture(monkeypatch, draft):
+    seen = []
+
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            return "PASS"
+        seen.append(messages[1]["content"])
+        return draft
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+    return seen
+
+
+def test_a_summary_request_is_asked_for_coverage_not_one_fact(monkeypatch):
+    """The wording the model gets decides whether it tries at all: asked to answer
+    a question, it declines a summary because no excerpt states "the document"."""
+    seen = _draft_capture(monkeypatch, "The deck walks through core ML algorithms. [S1]")
+
+    answer, reason, _ = llm.generate_answer_result("summarize this document", [digital_chunk()])
+
+    assert reason is None
+    assert answer == "The deck walks through core ML algorithms. [S1]"
+    assert llm.SUMMARY_INSTRUCTION in seen[0]
+    assert llm.ANSWER_INSTRUCTION not in seen[0]
+
+
+def test_a_fact_question_keeps_the_narrow_instruction(monkeypatch):
+    """The summary wording must not leak into ordinary questions, or a one-fact
+    answer starts padding itself with document description nobody asked for."""
+    seen = _draft_capture(monkeypatch, "The tank holds 200 litres. [S1]")
+
+    answer, reason, _ = llm.generate_answer_result("How much water?", [digital_chunk()])
+
+    assert reason is None
+    assert llm.ANSWER_INSTRUCTION in seen[0]
+    assert llm.SUMMARY_INSTRUCTION not in seen[0]
+
+
+def test_a_summary_is_verified_claim_by_claim_like_any_answer(monkeypatch):
+    """Coverage changes which excerpts are shown and how the model is asked, not
+    what it is allowed to say: an unsupported sentence still comes back out."""
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            return "FAIL" if "quantum" in messages[1]["content"] else "PASS"
+        return ("The deck walks through core ML algorithms. [S1] "
+                "It also covers quantum tunnelling. [S1]")
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, _ = llm.generate_answer_result("summarize this document", [digital_chunk()])
+
+    assert reason is None
+    assert answer == ("The deck walks through core ML algorithms. [S1]" + llm.PARTIAL_NOTE)
+    assert "quantum" not in answer
+
+
+def test_a_refusal_the_model_pastes_before_its_own_answer_is_not_the_answer(monkeypatch):
+    """Measured on a scanned deck: asked to summarize, qwen2.5:3b printed the
+    refusal line the prompt shows it, then carried on with six sentences naming
+    the deck's real topics. The pasted line is our own wording, so it is dropped
+    and the sentences behind it are judged on their own - a refusal that buries a
+    supported answer helps neither of them."""
+    def fake_chat(messages, num_predict, timeout=180):
+        system = messages[0]["content"]
+        if system.startswith("Return only PASS"):
+            return "PASS"
+        return (f"{llm.NOT_FOUND} [S1] "
+                "The deck walks through core ML algorithms. [S1]")
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, _ = llm.generate_answer_result("summarize this document", [digital_chunk()])
+
+    assert reason is None
+    assert answer == "The deck walks through core ML algorithms. [S1]"
+
+
+def test_a_draft_that_is_only_the_pasted_refusal_still_refuses(monkeypatch):
+    """Stripping that line must not turn an honest refusal into an empty answer
+    with chips on it: with nothing supportable behind it, the request is refused
+    and no sources are returned."""
+    def fake_chat(messages, num_predict, timeout=180):
+        return llm.NOT_FOUND + " [S1] [S2]"
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+    answer, reason, sources = llm.generate_answer_result(
+        "summarize this document", [digital_chunk(), digital_chunk()]
+    )
+
+    assert answer == llm.NOT_FOUND
+    assert reason in ("not_answerable", "unsupported_claim")
+    assert sources == []
 
 
 class FakeResponse:

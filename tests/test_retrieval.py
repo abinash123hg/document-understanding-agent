@@ -103,6 +103,19 @@ def test_top_k_is_respected(indexed_pair):
     assert len(results) <= 1
 
 
+def test_the_candidate_pool_grows_with_the_document():
+    """A fixed candidate pool is a coverage trap that scales backwards: 12
+    candidates cover 8% of a 150-chunk report but only 0.8% of a 1,500-chunk
+    book, so on a long document the answer-bearing chunk stops reaching the
+    reranker at all - and a chunk the reranker never sees cannot be recovered by
+    reranking. The pool must therefore grow with the document and stay bounded."""
+    assert retriever.candidate_pool(30) == settings.rerank_candidates
+    assert retriever.candidate_pool(150) == settings.rerank_candidates
+    assert retriever.candidate_pool(600) > settings.rerank_candidates
+    assert retriever.candidate_pool(1433) == settings.rerank_candidates_max
+    assert retriever.candidate_pool(120_000) == settings.rerank_candidates_max
+
+
 def test_rerank_margin_is_measured_from_the_leader_not_an_absolute_score(monkeypatch):
     """Absolute cross-encoder logits track how well-formed a passage is, so a
     fixed cutoff silently throws away every candidate from a chunked document
@@ -201,3 +214,108 @@ def test_settings_drive_the_default_context_size(indexed_pair):
     results = retriever.retrieve("storage tank villages", document_name=DOC_A)
 
     assert len(results) <= settings.top_k
+
+
+def _ten_chunk_document(fresh_document, name="overview_deck.pdf"):
+    document = fresh_document(name)
+    storage.add_chunks([
+        {
+            "id": f"ov-{i}",
+            "filename": document,
+            "document_name": document,
+            "chunk_index": i,
+            "chunk_id": f"{i // 2}-{i}",
+            "page_number": (i // 2) + 1,
+            "content_type": "digital_text",
+            "extraction_method": "pytesseract",
+            "text": f"Section {i} explains topic {i}.",
+        }
+        for i in range(10)
+    ])
+    return document
+
+
+def test_a_whole_document_request_takes_coverage_not_relevance(fresh_document):
+    """Ranking a deck against "summarize this" has no right answer to find, so the
+    window is one chunk from each equal slice of the document, in reading order."""
+    document = _ten_chunk_document(fresh_document)
+
+    rows = retriever.document_overview(document, limit=5)
+
+    assert [row["chunk_index"] for row in rows] == [0, 2, 4, 6, 8]
+    assert [row["page_number"] for row in rows] == [1, 2, 3, 4, 5]
+    assert all(row["document_name"] == document for row in rows)
+
+
+def test_coverage_uses_its_own_window_rather_than_top_k(fresh_document, monkeypatch):
+    """Six excerpts measured as too little for a summary: on a 13-page scanned
+    deck the model answered "summarize this document" with the refusal string at
+    6 chunks and with the deck's real topics at 10. So the overview window is its
+    own setting, wider than the top_k a fact question needs, and a caller that
+    passes no limit still gets it."""
+    document = _ten_chunk_document(fresh_document)
+    # Deliberately below top_k, so a window of this width can only have come from
+    # the overview setting rather than the fact-answering one.
+    monkeypatch.setattr(settings, "overview_chunks", 4)
+
+    rows = retriever.document_overview(document)
+
+    assert len(rows) == 4
+    assert [row["chunk_index"] for row in rows] == [0, 2, 5, 7]
+
+
+def test_coverage_stops_at_the_document_it_was_asked_about(fresh_document):
+    """The same isolation rule as ranking: no selected document means no evidence,
+    and an uploaded document cannot stand in for one that was never added."""
+    document = _ten_chunk_document(fresh_document)
+
+    assert retriever.document_overview("", limit=4) == []
+    assert retriever.document_overview(None, limit=4) == []
+    assert retriever.document_overview("not_uploaded.pdf", limit=4) == []
+    assert all(row["document_name"] == document
+               for row in retriever.document_overview(document, limit=3))
+
+
+def test_a_short_document_is_not_padded_with_repeats(fresh_document):
+    document = _ten_chunk_document(fresh_document, "overview_short.pdf")
+    storage.clear_document(document)
+    storage.add_chunks([
+        {
+            "id": "short-0", "filename": document, "document_name": document,
+            "chunk_index": 0, "chunk_id": "1-0", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": "One page of notes.",
+        },
+        {
+            "id": "short-1", "filename": document, "document_name": document,
+            "chunk_index": 1, "chunk_id": "1-1", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": "A second page of notes.",
+        },
+    ])
+
+    rows = retriever.document_overview(document, limit=6)
+
+    assert len(rows) == 2, "six labels cannot come from two excerpts"
+
+
+def test_blank_chunks_are_not_offered_as_evidence(fresh_document):
+    document = fresh_document("overview_blanks.pdf")
+    storage.add_chunks([
+        {
+            "id": "blank-0", "filename": document, "document_name": document,
+            "chunk_index": 0, "chunk_id": "1-0", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": "   ",
+        },
+        {
+            "id": "blank-1", "filename": document, "document_name": document,
+            "chunk_index": 1, "chunk_id": "1-1", "page_number": 1,
+            "content_type": "digital_text", "extraction_method": "plaintext",
+            "text": "The only readable page.",
+        },
+    ])
+
+    rows = retriever.document_overview(document, limit=4)
+
+    assert [row["text"] for row in rows] == ["The only readable page."]

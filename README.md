@@ -198,11 +198,22 @@ One pipeline, in this order:
 Indexing happens once, at upload. Retrieval never re-indexes — that is what made
 earlier versions slow and what allowed stale vectors to outlive a delete.
 
+A request about the document as a whole (`summarize this document`, `what is this
+document about`, `explain this document in simple words`) does not go through this
+ranking. No chunk *is* a summary, so every candidate scores within a point of
+every other one and the window fills with whichever slide happened to share a
+function word with the request; measured on a 13-page deck, the six chunks that
+came back were K-means centroids and a Naive Bayes table. Those requests instead
+take one chunk from each equal slice of the selected document, in reading order
+(`OVERVIEW_CHUNKS`), decided by a purpose-word list rather than a model call - a
+second local call to classify five words would cost another 15 core-seconds. Fact
+questions keep the ranking above.
+
 ---
 
 ## How hallucination is blocked
 
-Seven independent measures, each covered by a test:
+Eight independent measures, each covered by a test:
 
 1. **Document isolation.** Retrieval is scoped to one document name and returns
    nothing when none is selected. There is no global fallback.
@@ -227,13 +238,26 @@ Seven independent measures, each covered by a test:
    one chip that excerpt has. Refusing a correct answer over a label typo was
    measured as a real false negative on this machine, and the user reads it as
    the system never answering.
-5. **Independent verifier.** A second pass checks that each claim is stated in
-   the excerpts *and* that the draft answers the question asked. The drafting
-   prompt asks for exactly that too - only what the question asks, no supported
-   but unrelated background - because a real run padded a correct "200 litres"
-   answer with the survey's village count and the verifier refused the whole
-   thing. It fails closed: any error in the verifier means no answer.
-6. **OCR confidence gate.** Each handwritten chunk carries the *minimum*
+5. **Claim-by-claim verification.** The draft is split at its `[S<n]>` labels and
+   each statement is put to a second pass on its own, which returns PASS only if
+   an excerpt states it. One verdict over a whole draft was measured as the thing
+   that died most often: two bullet lines that each appear in the excerpts, joined
+   by the model into one sentence, read to a 3b checker as a new combined claim,
+   and it refused a correct "200 litres" answer that had been padded with the
+   survey's village count. Judged one statement at a time, the same evidence
+   passes. It fails closed - an errored or hedged verdict drops that claim, and a
+   claim past `MAX_CLAIMS_PER_ANSWER` is dropped unverified with a partial-answer
+   note, because that cap is a CPU budget rather than a trust budget. A bracketed
+   label is never accepted as evidence for its own claim, and a claim carrying a
+   pipe or a line break is dropped before the verifier is asked: the drafting
+   prompt makes every claim one labelled line, so such a claim is the scanned page
+   pasted through, and garbled evidence cannot carry a fact.
+6. **Evidence the model can actually read.** A `PASS` is only as good as the
+   excerpt behind it, so a leaked context header (`[S1 | file, page, kind]`, a
+   shape the prompt owns and no document does) is stripped from the draft, and a
+   draft that is nothing but that header or but the refusal line refuses rather
+   than showing the user our own wording with chips on it.
+7. **OCR confidence gate.** Each handwritten chunk carries the *minimum*
    confidence of the lines inside it, not the page average, so one unreadable
    line lowers only the chunk it landed in and cannot drag a clean chunk down
    with it. An excerpt is only shown to the model, and can only be cited, when
@@ -241,7 +265,7 @@ Seven independent measures, each covered by a test:
    handwriting is removed from the evidence rather than merely flagged, so a
    low-confidence line cannot be quoted as an answer; if nothing trustworthy
    remains, the system refuses.
-7. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
+8. **Temperature 0.0**, plus a prompt-injection rule: excerpts are data, never
    commands.
 
 In the UI, every `[Sn]` label in a successful answer is rendered as a chip that
@@ -350,6 +374,26 @@ Same machine, CPU only, warm caches unless stated otherwise:
 | One warm TrOCR pass over a 5-line page | 10.4 s |
 | The Tesseract attempt on that same page | 0.98 s |
 
+Answering costs, measured on a 13-page scanned slide deck (93 chunks, `pytesseract`
+text) served from a temporary `DATA_DIR` on this laptop, 19 questions asked twice
+over:
+
+| Operation | Time |
+|-----------|------|
+| `/chat` fact question, warm | wall mean 1.1-2.3 s, max 21.6 s |
+| The same, in system core-seconds (`GetSystemTimes`) | mean 13.1-14.5 s, max ~37 s |
+| First `/chat` after a restart, while Ollama loads the model | 198-257 core-s |
+| `/chat` whole-document request ("summarize this document") | wall 1.8-4.4 s, 20-52 core-s |
+
+Core-seconds exceed wall time because the inference runs across cores; they are
+the number a CPU-only budget is decided on. The answered count on those 19
+questions moved from 6/19 to 11-12/19 when the whole-draft verifier was replaced
+by per-claim verification, with a wider coverage window for whole-document
+requests and the layout-mark guard added, and 0 answers carrying page-layout
+junk (was 3 of 13). Two consecutive runs of identical code gave 11 and 12:
+`qwen2.5:3b` on CPU is not bit-reproducible at temperature 0, so read that count
+as +-2 rather than exact.
+
 What each kind of file costs, on this machine:
 
 | File | Pages recognised by | Page cap | Typical time |
@@ -426,10 +470,19 @@ sample_docs/                     digital and handwritten fixtures
   been measured, so no real-world accuracy is claimed.
 - The answer verifier is the same local model as the generator. It is a
   fail-closed check, not a proof of correctness.
-- Because every guard fails closed, a correct answer can still be refused: the
-  verifier rejects a draft that pads itself with an unrelated fact, and a page
-  scored under `HTR_MIN_CONFIDENCE` is refused outright. Read a refusal as "go
-  look at that page", not as "this file contains no answer".
+- Because every guard fails closed, a correct answer can still be refused: a claim
+  is dropped when its evidence is a slide heading rather than a sentence, and a
+  page scored under `HTR_MIN_CONFIDENCE` is refused outright. Read a refusal as
+  "go look at the page", not "the document does not say".
+- Answers on a scanned file are not stable run to run. At temperature 0 this model
+  on CPU still varies: two consecutive 19-question runs of identical code gave 11
+  and 12 answered, and one in four `tools/live_check.py` runs had the handwritten
+  PNG question come back as a refusal because the *draft* was the refusal line.
+  Single measurements here are labelled as such for that reason.
+- A claim that is only the question repeated (`What is linear regression? [S1]`)
+  passes every guard, because the slide does state it and it carries no layout
+  marks. Grounded is not the same as informative, and nothing in this pipeline
+  yet tells those apart.
 - Text only. Diagrams, stamps, signatures, charts and the layout of a table
   inside an image are invisible to this pipeline; a DOCX table survives only as
   its flattened words.

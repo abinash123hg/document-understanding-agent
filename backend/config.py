@@ -59,14 +59,34 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 100
 
     # Retrieval
-    top_k: int = 4
+    top_k: int = 6
     chunk_size: int = 400
     chunk_overlap: int = 60
     # Cross-encoder candidates are kept relative to the best score for the query
     # rather than against an absolute cutoff: on chunked PDFs the score for the
     # answer-bearing excerpt can sit near -10 while unrelated excerpts sit near
-    # -11, so only the gap between them carries information.
-    rerank_margin: float = 1.5
+    # -11, so only the gap between them carries information. Measured on scanned
+    # slides: at 1.5 only 1-2 excerpts survived when 4 were asked for, which put
+    # the answer-bearing chunk outside the window the model was shown.
+    rerank_margin: float = 2.5
+    # Candidate pool reaching the reranker. A fixed pool covers 8% of a 150-chunk
+    # document but 0.8% of a 1,500-chunk one, so it grows with the document and
+    # stops at rerank_candidates_max - that ceiling is what keeps a book inside
+    # the laptop's RAM and the rerank inside a few seconds.
+    rerank_candidates: int = 24
+    rerank_candidates_max: int = 40
+    # Evidence window for a request about the document as a whole, which is wider
+    # than top_k on purpose: no chunk is the summary, so the model has to see
+    # enough of the document to describe it. Measured on a 13-page scanned slide
+    # deck with qwen2.5:3b - at 6 chunks (2.6k characters) the model answered
+    # "summarize this document" with the refusal string every time, and at 10
+    # (4.1k) it produced the deck's actual topics.
+    overview_chunks: int = 10
+    # Each factual claim in a draft is verified on its own pass. The cap is a CPU
+    # budget, not a trust budget: on this laptop every extra check is another
+    # second or two, so a claim past the cap is left unverified and dropped from
+    # the answer rather than passed silently.
+    max_claims_per_answer: int = 5
 
     # Paths
     data_dir: Path = Path(__file__).resolve().parent.parent / "data"
